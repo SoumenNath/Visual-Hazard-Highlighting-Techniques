@@ -26,10 +26,10 @@ public class DepthColourHighlight : MonoBehaviour
 
     [Header("Distance Range")]
     [Tooltip("Distance at which the hazard shows the 'near' (danger) colour.")]
-    public float nearDistance = 1.5f;
+    public float nearDistance = 8f;
 
     [Tooltip("Distance at which the hazard shows the 'far' (safe) colour.")]
-    public float farDistance  = 10f;
+    public float farDistance  = 40f;
 
     [Header("Colour Mapping")]
     [Tooltip("Colour displayed when the hazard is at or closer than nearDistance.")]

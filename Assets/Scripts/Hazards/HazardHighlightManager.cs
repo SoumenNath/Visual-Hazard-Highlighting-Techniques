@@ -81,11 +81,14 @@ public class HazardHighlightManager : MonoBehaviour
     private void ApplyCondition(GameObject hazard, HighlightCondition condition)
     {
         // Deactivate everything first.
-        var outline = hazard.GetComponent<ObjectOutlineHighlight>();
-        var halo    = hazard.GetComponent<PeripheralHaloHighlight>();
-        var depth   = hazard.GetComponent<DepthColourHighlight>();
-        var beam    = hazard.GetComponent<DirectionalBeamHighlight>();
-
+        // var outline = hazard.GetComponent<ObjectOutlineHighlight>();
+        // var halo    = hazard.GetComponent<PeripheralHaloHighlight>();
+        // var depth   = hazard.GetComponent<DepthColourHighlight>();
+        // var beam    = hazard.GetComponent<DirectionalBeamHighlight>();
+        var outline = hazard.GetComponentInChildren<ObjectOutlineHighlight>();
+        var halo    = hazard.GetComponentInChildren<PeripheralHaloHighlight>();
+        var depth   = hazard.GetComponentInChildren<DepthColourHighlight>();
+        var beam    = hazard.GetComponentInChildren<DirectionalBeamHighlight>();
         outline?.Deactivate();
         halo?.Deactivate();
         depth?.Deactivate();
