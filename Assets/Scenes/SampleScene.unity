@@ -269,7 +269,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b4bcf81de71dece4bbfe0457aa9526b5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  speed: 5
+  speed: 4
   autoStart: 0
 --- !u!1 &409916989
 GameObject:
@@ -976,7 +976,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   outlineColour: {r: 1, g: 0, b: 0, a: 1}
-  outlineWidth: 0.053
+  outlineWidth: 0.005
   pulseSpeed: 2
   pulseMinAlpha: 0.4
 --- !u!65 &1128015453
@@ -1257,7 +1257,7 @@ MonoBehaviour:
   inputDetector: {fileID: 940145729}
   highlightManager: {fileID: 940145727}
   playerCamera: {fileID: 330585546}
-  trialsPerCondition: 1
+  trialsPerCondition: 4
   interTrialInterval: 3
   responseTimeLimit: 10
   participantID: 1

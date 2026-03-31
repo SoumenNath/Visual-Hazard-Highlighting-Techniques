@@ -198,10 +198,10 @@ public class TrialControllerScenario2 : MonoBehaviour
     {
         var conditions = new List<HazardHighlightManager.HighlightCondition>
         {
-            HazardHighlightManager.HighlightCondition.ObjectOutline,
+            // HazardHighlightManager.HighlightCondition.ObjectOutline,
             HazardHighlightManager.HighlightCondition.PeripheralHalo,
-            HazardHighlightManager.HighlightCondition.DepthColour,
-            HazardHighlightManager.HighlightCondition.DirectionalBeam
+            // HazardHighlightManager.HighlightCondition.DepthColour,
+            // HazardHighlightManager.HighlightCondition.DirectionalBeam
         };
 
         int offset  = (participantID - 1) % conditions.Count;
