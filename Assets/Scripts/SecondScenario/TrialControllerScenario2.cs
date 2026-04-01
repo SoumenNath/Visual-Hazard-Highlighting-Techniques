@@ -169,12 +169,18 @@ public class TrialControllerScenario2 : MonoBehaviour
                   $"{(responded ? $"{responseTime:F3}s" : "TIMEOUT")}");
 
         // --- 8. Clean up. ---
+       // NEW — add player position reset
         inputDetector.StopListening();
         _waitingForResponse = false;
         playerMovement.Pause();
         highlightManager.SetActiveCondition(
             HazardHighlightManager.HighlightCondition.None);
         oncomingSpawner.ClearVehicles();
+
+        // Reset player Z position so road never runs out.
+        Vector3 resetPos = playerCamera.transform.position;
+        resetPos.z = 0f;
+        playerCamera.transform.position = resetPos;
     }
 
     private void HandleDetectionResponse()
