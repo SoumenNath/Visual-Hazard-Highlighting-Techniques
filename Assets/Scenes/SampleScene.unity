@@ -1258,7 +1258,7 @@ MonoBehaviour:
   inputDetector: {fileID: 940145729}
   highlightManager: {fileID: 940145727}
   playerCamera: {fileID: 330585546}
-  trialsPerCondition: 1
+  trialsPerCondition: 10
   interTrialInterval: 3
   responseTimeLimit: 10
   participantID: 1

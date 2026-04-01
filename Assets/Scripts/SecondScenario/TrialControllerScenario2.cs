@@ -94,7 +94,8 @@ public class TrialControllerScenario2 : MonoBehaviour
         var condition            = _trialSequence[trialIndex];
         int trialWithinCondition = (trialIndex % trialsPerCondition) + 1;
 
-        Debug.Log($"[Scenario2] Trial {trialIndex + 1} | Condition: {condition}");
+        //Debug.Log($"[Scenario2] Trial {trialIndex + 1} | Condition: {condition}");
+        LogTrialProgress(trialIndex, condition);
 
         // --- 1. Set condition. ---
         highlightManager.SetActiveCondition(
@@ -187,14 +188,129 @@ public class TrialControllerScenario2 : MonoBehaviour
         _studyComplete = true;
         playerMovement.Pause();
         SaveResults();
-        Debug.Log("[Scenario2] Study complete. Results saved.");
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"═══════════════════════════════════════════");
+        sb.AppendLine($"  STUDY COMPLETE — PARTICIPANT {participantID}");
+        sb.AppendLine($"═══════════════════════════════════════════");
+        sb.AppendLine($"  Total trials completed: {_results.Count}");
+        sb.AppendLine($"  Results saved to CSV.");
+        sb.AppendLine($"───────────────────────────────────────────");
+        sb.AppendLine($"  Response summary:");
+
+        var groups = new System.Collections.Generic.Dictionary
+            <string, System.Collections.Generic.List<float>>();
+        foreach (var r in _results)
+        {
+            if (!groups.ContainsKey(r.Condition))
+                groups[r.Condition] = new System.Collections.Generic.List<float>();
+            if (r.Responded)
+                groups[r.Condition].Add(r.ResponseTime);
+        }
+
+        foreach (var kvp in groups)
+        {
+            float avg = kvp.Value.Count > 0
+                ? kvp.Value[0] : 0f;
+            float sum = 0f;
+            foreach (var v in kvp.Value) sum += v;
+            avg = kvp.Value.Count > 0 ? sum / kvp.Value.Count : 0f;
+
+            sb.AppendLine($"  {kvp.Key,-22} " +
+                        $"Responded: {kvp.Value.Count}/{trialsPerCondition} " +
+                        $"| Avg RT: {avg:F3}s");
+        }
+
+        sb.AppendLine($"═══════════════════════════════════════════");
+        Debug.Log(sb.ToString());
     }
 
     // ------------------------------------------------------------------
-    // Trial sequence (same counterbalanced structure as Scenario 1)
+    // Trial sequence 
     // ------------------------------------------------------------------
 
+    // private void BuildTrialSequence()
+    // {
+    //     var conditions = new List<HazardHighlightManager.HighlightCondition>
+    //     {
+    //         HazardHighlightManager.HighlightCondition.ObjectOutline,
+    //         HazardHighlightManager.HighlightCondition.PeripheralHalo,
+    //         HazardHighlightManager.HighlightCondition.DepthColour,
+    //         HazardHighlightManager.HighlightCondition.DirectionalBeam
+    //     };
+
+    //     int offset  = (participantID - 1) % conditions.Count;
+    //     var ordered = new List<HazardHighlightManager.HighlightCondition>();
+    //     for (int i = 0; i < conditions.Count; i++)
+    //         ordered.Add(conditions[(i + offset) % conditions.Count]);
+
+    //     _trialSequence = new List<HazardHighlightManager.HighlightCondition>();
+    //     foreach (var cond in ordered)
+    //         for (int t = 0; t < trialsPerCondition; t++)
+    //             _trialSequence.Add(cond);
+    // }
+
+    private void LogTrialProgress(int trialIndex,
+    HazardHighlightManager.HighlightCondition condition)
+    {
+        int block        = (trialIndex / 4) + 1;
+        int posInBlock   = (trialIndex % 4) + 1;
+        int remaining    = _trialSequence.Count - trialIndex - 1;
+
+        // Count how many of each condition have been completed so far.
+        var counts = new System.Collections.Generic.Dictionary
+            <HazardHighlightManager.HighlightCondition, int>();
+        foreach (var c in System.Enum.GetValues(
+            typeof(HazardHighlightManager.HighlightCondition)))
+        {
+            var cond = (HazardHighlightManager.HighlightCondition)c;
+            if (cond == HazardHighlightManager.HighlightCondition.None) continue;
+            counts[cond] = 0;
+        }
+        for (int i = 0; i < trialIndex; i++)
+            if (counts.ContainsKey(_trialSequence[i]))
+                counts[_trialSequence[i]]++;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"───────────────────────────────────────────");
+        sb.AppendLine($"  ▶ TRIAL {trialIndex + 1} / {_trialSequence.Count} " +
+                    $"| Block {block} | Position {posInBlock}/4");
+        sb.AppendLine($"  Condition: {condition}");
+        sb.AppendLine($"  Trials remaining: {remaining}");
+        sb.AppendLine($"  Condition counts so far:");
+        foreach (var kvp in counts)
+            sb.AppendLine($"    {kvp.Key,-20} {kvp.Value,2} / {trialsPerCondition}");
+        sb.AppendLine($"───────────────────────────────────────────");
+        Debug.Log(sb.ToString());
+    }
+
     private void BuildTrialSequence()
+    {
+        _trialSequence = GenerateBalancedSequence(participantID);
+
+        // Print full sequence in a readable format.
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"═══════════════════════════════════════════");
+        sb.AppendLine($"  PARTICIPANT {participantID} — TRIAL SEQUENCE");
+        sb.AppendLine($"═══════════════════════════════════════════");
+        sb.AppendLine($"  Total trials: {_trialSequence.Count}");
+        sb.AppendLine($"  Trials per condition: {trialsPerCondition}");
+        sb.AppendLine($"───────────────────────────────────────────");
+
+        for (int i = 0; i < _trialSequence.Count; i++)
+        {
+            int block = (i / 4) + 1;
+            int posInBlock = (i % 4) + 1;
+            sb.AppendLine($"  Trial {i + 1,2} | Block {block,2} | " +
+                        $"Position {posInBlock} | {_trialSequence[i]}");
+        }
+
+        sb.AppendLine($"═══════════════════════════════════════════");
+        Debug.Log(sb.ToString());
+    }
+
+    
+    private List<HazardHighlightManager.HighlightCondition> GenerateBalancedSequence(int pID)
     {
         var conditions = new List<HazardHighlightManager.HighlightCondition>
         {
@@ -204,17 +320,49 @@ public class TrialControllerScenario2 : MonoBehaviour
             HazardHighlightManager.HighlightCondition.DirectionalBeam
         };
 
-        int offset  = (participantID - 1) % conditions.Count;
-        var ordered = new List<HazardHighlightManager.HighlightCondition>();
+        // --- Step 1: Assign a Latin square row to this participant ---
+        // Guarantees every condition order appears evenly across participants.
+        // 4 conditions = 4 unique starting offsets, repeating every 4 participants.
+        int offset = (pID - 1) % conditions.Count;
+        var orderedConditions = new List<HazardHighlightManager.HighlightCondition>();
         for (int i = 0; i < conditions.Count; i++)
-            ordered.Add(conditions[(i + offset) % conditions.Count]);
+            orderedConditions.Add(conditions[(i + offset) % conditions.Count]);
 
-        _trialSequence = new List<HazardHighlightManager.HighlightCondition>();
-        foreach (var cond in ordered)
-            for (int t = 0; t < trialsPerCondition; t++)
-                _trialSequence.Add(cond);
+        // --- Step 2: Build blocks of 4 (one of each condition per block) ---
+        // With 10 trials per condition and 4 conditions = 40 trials total.
+        // Divide into 10 blocks of 4, each containing all 4 conditions once.
+        var blocks = new List<List<HazardHighlightManager.HighlightCondition>>();
+        for (int b = 0; b < trialsPerCondition; b++)
+        {
+            var block = new List<HazardHighlightManager.HighlightCondition>(orderedConditions);
+            // Shuffle within each block using a deterministic seed per participant + block.
+            block = SeededShuffle(block, pID * 100 + b);
+            blocks.Add(block);
+        }
+
+        // --- Step 3: Flatten blocks into final sequence ---
+        var sequence = new List<HazardHighlightManager.HighlightCondition>();
+        foreach (var block in blocks)
+            foreach (var cond in block)
+                sequence.Add(cond);
+
+        return sequence;
     }
 
+    private List<HazardHighlightManager.HighlightCondition> SeededShuffle(
+        List<HazardHighlightManager.HighlightCondition> input, int seed)
+    {
+        var result = new List<HazardHighlightManager.HighlightCondition>(input);
+
+        // Use System.Random with a fixed seed for deterministic shuffling.
+        var rng = new System.Random(seed);
+        for (int i = result.Count - 1; i > 0; i--)
+        {
+            int j = rng.Next(0, i + 1);
+            (result[i], result[j]) = (result[j], result[i]);
+        }
+        return result;
+    }
     // ------------------------------------------------------------------
     // CSV logging
     // ------------------------------------------------------------------
