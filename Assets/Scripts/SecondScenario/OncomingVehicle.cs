@@ -17,10 +17,10 @@ public class OncomingVehicle : MonoBehaviour
 
     [Header("Lane Drift (Hazard Only)")]
     [Tooltip("Minimum time before the hazard starts drifting into player lane.")]
-    public float minDriftDelay = 2f;
+    public float minDriftDelay = 1f;
 
     [Tooltip("Maximum time before the hazard starts drifting into player lane.")]
-    public float maxDriftDelay = 2f;
+    public float maxDriftDelay = 4f;
 
     [Tooltip("How many seconds it takes to fully drift into the player lane.")]
     public float driftDuration = 2.5f;

@@ -876,7 +876,7 @@ MonoBehaviour:
   vehicleScaleX: 1
   vehicleScaleY: 1
   vehicleScaleZ: 1
-  spawnDistanceAhead: 50
+  spawnDistanceAhead: 55
   oncomingLaneXPositions:
   - -6
   - -3
@@ -1086,8 +1086,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   playerCamera: {fileID: 0}
   beamColour: {r: 1, g: 0.85, b: 0.1, a: 0.8}
-  beamWidth: 0.05
   beamLength: 8
+  segmentCount: 20
+  beamWidth: 0.05
   pulseSpeed: 1.2
 --- !u!1 &1485992430
 GameObject:
@@ -1257,7 +1258,7 @@ MonoBehaviour:
   inputDetector: {fileID: 940145729}
   highlightManager: {fileID: 940145727}
   playerCamera: {fileID: 330585546}
-  trialsPerCondition: 4
+  trialsPerCondition: 1
   interTrialInterval: 3
   responseTimeLimit: 10
   participantID: 1

@@ -7,7 +7,8 @@ public class DirectionalBeamHighlight : MonoBehaviour
     public Camera playerCamera;
 
     [Header("Beam Appearance")]
-    public Color beamColour = new Color(1f, 0.85f, 0.1f, 1f);
+    //public Color beamColour = new Color(1f, 0.85f, 0.1f, 1f); //yellow
+    public Color beamColour = new Color(1f, 0.15f, 0.15f, 1f);   // red beam
 
     // [Tooltip("Thickness of each segment.")]
     // public float beamWidth = 0.05f;

@@ -153,6 +153,17 @@ public class PeripheralHaloHighlight : MonoBehaviour
         float hh = Screen.height * 0.5f;
         _ringRT.anchoredPosition = new Vector2(screenPos.x - hw, screenPos.y - hh);
 
+        float dist    = Vector3.Distance(playerCamera.transform.position, transform.position);
+        float minDist = 3f;    // distance at which ring is largest
+        float maxDist = 40f;   // distance at which ring is smallest
+        float minSize = ringDiameter;          // base size when far
+        float maxSize = ringDiameter * 4f;     // max size when close
+
+        float t        = 1f - Mathf.Clamp01((dist - minDist) / (maxDist - minDist));
+        float ringSize = Mathf.Lerp(minSize, maxSize, Mathf.SmoothStep(0f, 1f, t));
+        _ringRT.sizeDelta = new Vector2(ringSize, ringSize);
+
+
         // Pulse alpha.
         float pulse = (pulseFrequency > 0f)
             ? Mathf.Lerp(0.3f, 1f,
