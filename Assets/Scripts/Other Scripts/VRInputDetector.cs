@@ -1,23 +1,18 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.XR;
 using System;
 
 /// <summary>
 /// VRInputDetector.cs
 /// Listens for a VR controller button press and fires an event that the
 /// TrialController subscribes to. Uses the new Unity Input System.
-///
-/// Assign the Input Action for your desired button in the Inspector,
-/// or use the default which listens for either trigger button on
-/// left or right XR controllers.
-///
-/// Attach to any persistent GameObject (e.g. Study Manager).
+/// Supports both VR controller trigger and keyboard fallback for desktop testing.
 /// </summary>
 public class VRInputDetector : MonoBehaviour
 {
     [Header("Input Bindings")]
-    [Tooltip("Input action reference for the detection button. " +
-             "Leave empty to use keyboard Space as fallback for testing.")]
+    [Tooltip("Input action reference for the detection button.")]
     public InputActionReference detectionButtonAction;
 
     // Fired when the participant presses the detection button.
@@ -27,86 +22,102 @@ public class VRInputDetector : MonoBehaviour
 
     // ------------------------------------------------------------------
 
-    //Old for VR
-    // private void OnEnable()
-    // {
-    //     if (detectionButtonAction != null)
-    //     {
-    //         detectionButtonAction.action.Enable();
-    //         detectionButtonAction.action.performed += HandleButtonPress;
-    //     }
-    // }
-
-    //New for keyboard testing
     private void OnEnable()
     {
         if (detectionButtonAction != null)
         {
             detectionButtonAction.action.Enable();
             detectionButtonAction.action.performed += HandleButtonPress;
+            Debug.Log("[VRInputDetector] Action enabled and listening.");
         }
-        // No VR action assigned — keyboard fallback in Update() handles input
+        else
+        {
+            Debug.LogWarning("[VRInputDetector] No action assigned in Inspector!");
+        }
     }
 
     private void OnDisable()
     {
         if (detectionButtonAction != null)
+        {
             detectionButtonAction.action.performed -= HandleButtonPress;
+            detectionButtonAction.action.Disable();
+        }
     }
 
-    // Old for VR
-    // private void Update()
-    // {
-    //     if (!_isListening) return;
-
-    //     // Keyboard spacebar fallback for desktop testing.
-    //     if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
-    //         FireDetection();
-
-    //     // Also check XR controller triggers directly if no action assigned.
-    //     if (detectionButtonAction == null)
-    //         CheckXRFallback();
-    // }
-
-    //New for keyboard testing
     private void Update()
     {
         if (!_isListening) return;
 
-        // Spacebar for desktop testing
-        if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
-            FireDetection();
+        // --- Debug XR controller detection ---
+        var devices = InputSystem.devices;
+        bool foundController = false;
+        foreach (var device in devices)
+        {
+            if (device is UnityEngine.InputSystem.XR.XRController)
+            {
+                foundController = true;
+                Debug.Log($"[VRInputDetector] XR Controller found: {device.name} " +
+                          $"| Display: {device.displayName}");
+            }
+        }
+        if (!foundController)
+            Debug.LogWarning("[VRInputDetector] No XR controllers detected by Input System.");
 
-        // Enter key as additional fallback
-        if (Keyboard.current != null && Keyboard.current.enterKey.wasPressedThisFrame)
+        // --- Keyboard fallback for desktop testing ---
+        if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
+        {
+            Debug.Log("[VRInputDetector] Spacebar pressed — firing detection.");
             FireDetection();
+        }
+
+        if (Keyboard.current != null && Keyboard.current.enterKey.wasPressedThisFrame)
+        {
+            Debug.Log("[VRInputDetector] Enter pressed — firing detection.");
+            FireDetection();
+        }
     }
+
     // ------------------------------------------------------------------
     // Public API
     // ------------------------------------------------------------------
 
-    public void StartListening() => _isListening = true;
-    public void StopListening()  => _isListening = false;
+    public void StartListening()
+    {
+        _isListening = true;
+        Debug.Log("[VRInputDetector] Started listening for input.");
+    }
+
+    public void StopListening()
+    {
+        _isListening = false;
+        Debug.Log("[VRInputDetector] Stopped listening.");
+    }
 
     // ------------------------------------------------------------------
 
     private void HandleButtonPress(InputAction.CallbackContext ctx)
     {
+        Debug.Log($"[VRInputDetector] HandleButtonPress called. " +
+                  $"Listening: {_isListening} | " +
+                  $"Control: {ctx.control?.name} | " +
+                  $"Device: {ctx.control?.device?.name}");
+
         if (_isListening)
+        {
+            Debug.Log("[VRInputDetector] VR controller button pressed — firing detection.");
             FireDetection();
+        }
+        else
+        {
+            Debug.LogWarning("[VRInputDetector] Button pressed but not currently listening.");
+        }
     }
 
     private void FireDetection()
     {
-        _isListening = false;   // prevent double-firing
+        _isListening = false;
         OnDetectionButtonPressed?.Invoke();
-    }
-
-    private void CheckXRFallback()
-    {
-        // Try to read XR controller trigger via Gamepad if available.
-        var gamepad = Gamepad.current;
-        if (gamepad != null && gamepad.buttonSouth.wasPressedThisFrame)
-            FireDetection();
+        Debug.Log("[VRInputDetector] Detection fired.");
     }
 }

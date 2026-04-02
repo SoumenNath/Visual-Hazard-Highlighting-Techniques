@@ -1,0 +1,114 @@
+#if UNITY_EDITOR
+using UnityEditor;
+using System.IO;
+
+public class CreateVRInput
+{
+    [MenuItem("Tools/Create VRInputActions")]
+    static void Create()
+    {
+        string json = @"{
+    ""name"": ""VRInputActions"",
+    ""maps"": [
+        {
+            ""name"": ""Study"",
+            ""id"": ""a1b2c3d4-e5f6-7890-abcd-ef1234567890"",
+            ""actions"": [
+                {
+                    ""name"": ""Detect"",
+                    ""type"": ""Button"",
+                    ""id"": ""b2c3d4e5-f6a7-8901-bcde-f12345678901"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
+                }
+            ],
+            ""bindings"": [
+                {
+                    ""name"": """",
+                    ""id"": ""c3d4e5f6-a7b8-9012-cdef-123456789012"",
+                    ""path"": ""<XRController>{RightHand}/triggerPressed"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Detect"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""d4e5f6a7-b8c9-0123-defa-234567890123"",
+                    ""path"": ""<XRController>{LeftHand}/triggerPressed"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Detect"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""e5f6a7b8-c9d0-1234-efab-345678901234"",
+                    ""path"": ""<XRController>{RightHand}/gripPressed"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Detect"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""f6a7b8c9-d0e1-2345-fabc-456789012345"",
+                    ""path"": ""<XRController>{LeftHand}/gripPressed"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Detect"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""a7b8c9d0-e1f2-3456-abcd-567890123456"",
+                    ""path"": ""<XRController>{RightHand}/primaryButton"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Detect"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""b8c9d0e1-f2a3-4567-bcde-678901234567"",
+                    ""path"": ""<XRController>{LeftHand}/primaryButton"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Detect"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                }
+            ]
+        }
+    ],
+    ""controlSchemes"": []
+}";
+
+        string path = "Assets/VRInputActions.inputactions";
+
+        if (File.Exists(path))
+            AssetDatabase.DeleteAsset(path);
+
+        File.WriteAllText(path, json);
+        AssetDatabase.Refresh();
+
+        UnityEngine.Debug.Log("[VRInput] VRInputActions created with bindings: " +
+                              "Right Trigger, Left Trigger, " +
+                              "Right Grip, Left Grip, " +
+                              "Right Primary Button (A), Left Primary Button (X)");
+    }
+}
+#endif
