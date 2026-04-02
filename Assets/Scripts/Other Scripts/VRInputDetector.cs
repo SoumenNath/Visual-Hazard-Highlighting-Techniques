@@ -1,81 +1,166 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
 using UnityEngine.XR;
 using System;
+using System.Collections.Generic;
 
 /// <summary>
 /// VRInputDetector.cs
-/// Listens for a VR controller button press and fires an event that the
-/// TrialController subscribes to. Uses the new Unity Input System.
-/// Supports both VR controller trigger and keyboard fallback for desktop testing.
+/// Uses UnityEngine.XR.InputDevices directly instead of the new Input System
+/// for more reliable Meta Quest controller detection via Meta Link.
 /// </summary>
 public class VRInputDetector : MonoBehaviour
 {
     [Header("Input Bindings")]
-    [Tooltip("Input action reference for the detection button.")]
-    public InputActionReference detectionButtonAction;
+    [Tooltip("Input action reference — kept for compatibility but not used in XR mode.")]
+    public UnityEngine.InputSystem.InputActionReference detectionButtonAction;
 
-    // Fired when the participant presses the detection button.
     public event Action OnDetectionButtonPressed;
 
     private bool _isListening = false;
+
+    private InputDevice _rightController;
+    private InputDevice _leftController;
+
+    private bool _rightTriggerWasPressed  = false;
+    private bool _leftTriggerWasPressed   = false;
+    private bool _rightGripWasPressed     = false;
+    private bool _leftGripWasPressed      = false;
+    private bool _rightPrimaryWasPressed  = false;
+    private bool _leftPrimaryWasPressed   = false;
 
     // ------------------------------------------------------------------
 
     private void OnEnable()
     {
-        if (detectionButtonAction != null)
-        {
-            detectionButtonAction.action.Enable();
-            detectionButtonAction.action.performed += HandleButtonPress;
-            Debug.Log("[VRInputDetector] Action enabled and listening.");
-        }
-        else
-        {
-            Debug.LogWarning("[VRInputDetector] No action assigned in Inspector!");
-        }
+        InputDevices.deviceConnected    += OnDeviceConnected;
+        InputDevices.deviceDisconnected += OnDeviceDisconnected;
+        FindControllers();
+        Debug.Log("[VRInputDetector] Initialised — using XR InputDevices API.");
     }
 
     private void OnDisable()
     {
-        if (detectionButtonAction != null)
-        {
-            detectionButtonAction.action.performed -= HandleButtonPress;
-            detectionButtonAction.action.Disable();
-        }
+        InputDevices.deviceConnected    -= OnDeviceConnected;
+        InputDevices.deviceDisconnected -= OnDeviceDisconnected;
     }
+
+    // ------------------------------------------------------------------
+
+    private void OnDeviceConnected(InputDevice device)
+    {
+        Debug.Log($"[VRInputDetector] Device connected: {device.name} | " +
+                  $"Characteristics: {device.characteristics}");
+        FindControllers();
+    }
+
+    private void OnDeviceDisconnected(InputDevice device)
+    {
+        Debug.Log($"[VRInputDetector] Device disconnected: {device.name}");
+        FindControllers();
+    }
+
+    private void FindControllers()
+    {
+        var rightHandDevices = new List<InputDevice>();
+        InputDevices.GetDevicesWithCharacteristics(
+            InputDeviceCharacteristics.Right |
+            InputDeviceCharacteristics.Controller,
+            rightHandDevices);
+
+        if (rightHandDevices.Count > 0)
+        {
+            _rightController = rightHandDevices[0];
+            Debug.Log($"[VRInputDetector] Right controller found: {_rightController.name}");
+        }
+        else
+            Debug.LogWarning("[VRInputDetector] No right controller found.");
+
+        var leftHandDevices = new List<InputDevice>();
+        InputDevices.GetDevicesWithCharacteristics(
+            InputDeviceCharacteristics.Left |
+            InputDeviceCharacteristics.Controller,
+            leftHandDevices);
+
+        if (leftHandDevices.Count > 0)
+        {
+            _leftController = leftHandDevices[0];
+            Debug.Log($"[VRInputDetector] Left controller found: {_leftController.name}");
+        }
+        else
+            Debug.LogWarning("[VRInputDetector] No left controller found.");
+
+        // List ALL connected XR devices.
+        var allDevices = new List<InputDevice>();
+        InputDevices.GetDevices(allDevices);
+        Debug.Log($"[VRInputDetector] Total XR devices found: {allDevices.Count}");
+        foreach (var d in allDevices)
+            Debug.Log($"  Device: {d.name} | Characteristics: {d.characteristics}");
+    }
+
+    // ------------------------------------------------------------------
 
     private void Update()
     {
-        if (!_isListening) return;
-
-        // --- Debug XR controller detection ---
-        var devices = InputSystem.devices;
-        bool foundController = false;
-        foreach (var device in devices)
+        if (!_isListening)
         {
-            if (device is UnityEngine.InputSystem.XR.XRController)
-            {
-                foundController = true;
-                Debug.Log($"[VRInputDetector] XR Controller found: {device.name} " +
-                          $"| Display: {device.displayName}");
-            }
+            ResetButtonStates();
+            return;
         }
-        if (!foundController)
-            Debug.LogWarning("[VRInputDetector] No XR controllers detected by Input System.");
 
-        // --- Keyboard fallback for desktop testing ---
-        if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
+        // --- XR Controller input ---
+        if (CheckButton(_rightController, CommonUsages.triggerButton,
+                        ref _rightTriggerWasPressed,  "Right Trigger"))  return;
+        if (CheckButton(_leftController,  CommonUsages.triggerButton,
+                        ref _leftTriggerWasPressed,   "Left Trigger"))   return;
+        if (CheckButton(_rightController, CommonUsages.gripButton,
+                        ref _rightGripWasPressed,     "Right Grip"))     return;
+        if (CheckButton(_leftController,  CommonUsages.gripButton,
+                        ref _leftGripWasPressed,      "Left Grip"))      return;
+        if (CheckButton(_rightController, CommonUsages.primaryButton,
+                        ref _rightPrimaryWasPressed,  "Right Primary"))  return;
+        if (CheckButton(_leftController,  CommonUsages.primaryButton,
+                        ref _leftPrimaryWasPressed,   "Left Primary"))   return;
+
+        // --- Keyboard fallback ---
+        if (Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.Return))
         {
-            Debug.Log("[VRInputDetector] Spacebar pressed — firing detection.");
+            Debug.Log("[VRInputDetector] Keyboard fallback pressed.");
             FireDetection();
         }
+    }
 
-        if (Keyboard.current != null && Keyboard.current.enterKey.wasPressedThisFrame)
+    // ------------------------------------------------------------------
+
+    private bool CheckButton(InputDevice device,
+                              InputFeatureUsage<bool> usage,
+                              ref bool wasPressed,
+                              string buttonName)
+    {
+        if (!device.isValid) return false;
+
+        bool isPressed = false;
+        device.TryGetFeatureValue(usage, out isPressed);
+
+        if (isPressed && !wasPressed)
         {
-            Debug.Log("[VRInputDetector] Enter pressed — firing detection.");
+            Debug.Log($"[VRInputDetector] {buttonName} pressed — firing detection.");
+            wasPressed = true;
             FireDetection();
+            return true;
         }
+
+        if (!isPressed) wasPressed = false;
+        return false;
+    }
+
+    private void ResetButtonStates()
+    {
+        _rightTriggerWasPressed  = false;
+        _leftTriggerWasPressed   = false;
+        _rightGripWasPressed     = false;
+        _leftGripWasPressed      = false;
+        _rightPrimaryWasPressed  = false;
+        _leftPrimaryWasPressed   = false;
     }
 
     // ------------------------------------------------------------------
@@ -85,7 +170,8 @@ public class VRInputDetector : MonoBehaviour
     public void StartListening()
     {
         _isListening = true;
-        Debug.Log("[VRInputDetector] Started listening for input.");
+        FindControllers();
+        Debug.Log("[VRInputDetector] Started listening.");
     }
 
     public void StopListening()
@@ -94,30 +180,10 @@ public class VRInputDetector : MonoBehaviour
         Debug.Log("[VRInputDetector] Stopped listening.");
     }
 
-    // ------------------------------------------------------------------
-
-    private void HandleButtonPress(InputAction.CallbackContext ctx)
-    {
-        Debug.Log($"[VRInputDetector] HandleButtonPress called. " +
-                  $"Listening: {_isListening} | " +
-                  $"Control: {ctx.control?.name} | " +
-                  $"Device: {ctx.control?.device?.name}");
-
-        if (_isListening)
-        {
-            Debug.Log("[VRInputDetector] VR controller button pressed — firing detection.");
-            FireDetection();
-        }
-        else
-        {
-            Debug.LogWarning("[VRInputDetector] Button pressed but not currently listening.");
-        }
-    }
-
     private void FireDetection()
     {
         _isListening = false;
         OnDetectionButtonPressed?.Invoke();
-        Debug.Log("[VRInputDetector] Detection fired.");
+        Debug.Log("[VRInputDetector] Detection event fired.");
     }
 }
