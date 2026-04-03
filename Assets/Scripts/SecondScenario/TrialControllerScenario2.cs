@@ -9,17 +9,8 @@ using System.Text;
 ///
 /// Orchestrates Scenario 2 — oncoming vehicles passing in the opposite lane,
 /// with one vehicle randomly drifting into the player's lane as the hazard.
-///
-/// Key differences from TrialController (Scenario 1):
-///   - Uses OncomingVehicleSpawner instead of VehicleSpawner
-///   - Player continues moving forward throughout (no pause during trial)
-///   - Highlight activates when the hazard STARTS drifting, not at trial start
-///   - Response timer begins at drift onset
-///
-/// Setup:
-///   Attach to a new empty GameObject called "StudyManagerScenario2",
-///   or add alongside the existing TrialController on Study Manager and
-///   enable/disable as needed per scenario.
+/// Saves results after every trial and on application quit.
+/// Incomplete trials are logged with their planned condition but no response time.
 /// </summary>
 public class TrialControllerScenario2 : MonoBehaviour
 {
@@ -35,9 +26,9 @@ public class TrialControllerScenario2 : MonoBehaviour
     public Transform                playerCamera;
 
     [Header("Trial Settings")]
-    public int   trialsPerCondition  = 5;
+    public int   trialsPerCondition  = 10;
     public float interTrialInterval  = 3f;
-    public float responseTimeLimit   = 10f;
+    public float responseTimeLimit   = 15f;
 
     [Header("Participant")]
     public int participantID = 1;
@@ -47,10 +38,12 @@ public class TrialControllerScenario2 : MonoBehaviour
     // ------------------------------------------------------------------
 
     private List<HazardHighlightManager.HighlightCondition> _trialSequence;
-    private int    _currentTrialIndex;
+    private int    _currentTrialIndex  = 0;
     private float  _trialStartTime;
     private bool   _waitingForResponse;
     private bool   _studyComplete;
+    private string _saveFilePath;
+
     private List<TrialResult> _results = new List<TrialResult>();
 
     // ------------------------------------------------------------------
@@ -59,6 +52,14 @@ public class TrialControllerScenario2 : MonoBehaviour
     {
         if (playerCamera == null)
             playerCamera = Camera.main.transform;
+
+        // Generate filename once at study start.
+        string folder = @"C:\Users\glenc\OneDrive\Desktop\VR-Trial-Results";
+        Directory.CreateDirectory(folder);
+        _saveFilePath = Path.Combine(folder,
+            $"HazardStudy_S2_P{participantID}_" +
+            $"{System.DateTime.Now:yyyyMMdd_HHmmss}.csv");
+        Debug.Log($"[Scenario2] Results will save to: {_saveFilePath}");
 
         BuildTrialSequence();
         inputDetector.OnDetectionButtonPressed += HandleDetectionResponse;
@@ -69,6 +70,55 @@ public class TrialControllerScenario2 : MonoBehaviour
     {
         if (inputDetector != null)
             inputDetector.OnDetectionButtonPressed -= HandleDetectionResponse;
+    }
+
+    // ------------------------------------------------------------------
+    // Save on application quit or stop
+    // ------------------------------------------------------------------
+
+    private void OnApplicationQuit()
+    {
+        FinalSave();
+    }
+
+    private void OnDisable()
+    {
+        FinalSave();
+    }
+
+    private void FinalSave()
+    {
+        // Write remaining planned trials with no response data.
+        for (int i = _currentTrialIndex; i < _trialSequence.Count; i++)
+        {
+            // Only add if not already recorded.
+            bool alreadyRecorded = false;
+            foreach (var r in _results)
+            {
+                if (r.TrialNumber == i + 1)
+                {
+                    alreadyRecorded = true;
+                    break;
+                }
+            }
+
+            if (!alreadyRecorded)
+            {
+                _results.Add(new TrialResult
+                {
+                    ParticipantID        = participantID,
+                    TrialNumber          = i + 1,
+                    Condition            = _trialSequence[i].ToString(),
+                    TrialWithinCondition = (i % trialsPerCondition) + 1,
+                    ResponseTime         = -1f,   // -1 = not completed
+                    Responded            = false,
+                    Completed            = false
+                });
+            }
+        }
+
+        SaveResults();
+        Debug.Log("[Scenario2] Final save on exit complete.");
     }
 
     // ------------------------------------------------------------------
@@ -94,7 +144,6 @@ public class TrialControllerScenario2 : MonoBehaviour
         var condition            = _trialSequence[trialIndex];
         int trialWithinCondition = (trialIndex % trialsPerCondition) + 1;
 
-        //Debug.Log($"[Scenario2] Trial {trialIndex + 1} | Condition: {condition}");
         LogTrialProgress(trialIndex, condition);
 
         // --- 1. Set condition. ---
@@ -105,20 +154,17 @@ public class TrialControllerScenario2 : MonoBehaviour
         var (hazardBody, hazardController) =
             oncomingSpawner.SpawnVehicles(playerCamera.position, condition);
 
-        // Assign hazard body to highlight manager.
         highlightManager.currentHazard = hazardBody;
 
         // --- 3. Start player movement. ---
         playerMovement.Resume();
 
         // --- 4. Wait for hazard to start drifting. ---
-        // The OncomingVehicle controller fires OnDriftStarted when drift begins.
         bool driftStarted = false;
         hazardController.OnDriftStarted = () => driftStarted = true;
 
-        // Wait until drift starts or vehicles pass the player.
         float waitTimer = 0f;
-        float maxWait   = 15f; // safety timeout
+        float maxWait   = 15f;
         while (!driftStarted && waitTimer < maxWait)
         {
             waitTimer += Time.deltaTime;
@@ -127,7 +173,6 @@ public class TrialControllerScenario2 : MonoBehaviour
 
         if (!driftStarted)
         {
-            // Vehicles passed without drift — skip trial.
             Debug.LogWarning("[Scenario2] Hazard drift did not trigger. Skipping trial.");
             oncomingSpawner.ClearVehicles();
             yield break;
@@ -162,14 +207,17 @@ public class TrialControllerScenario2 : MonoBehaviour
             Condition            = condition.ToString(),
             TrialWithinCondition = trialWithinCondition,
             ResponseTime         = responseTime,
-            Responded            = responded
+            Responded            = responded,
+            Completed            = true
         });
 
         Debug.Log($"[Scenario2] Response: " +
                   $"{(responded ? $"{responseTime:F3}s" : "TIMEOUT")}");
 
-        // --- 8. Clean up. ---
-       // NEW — add player position reset
+        // --- 8. Save after every completed trial. ---
+        SaveResults();
+
+        // --- 9. Clean up. ---
         inputDetector.StopListening();
         _waitingForResponse = false;
         playerMovement.Pause();
@@ -193,109 +241,49 @@ public class TrialControllerScenario2 : MonoBehaviour
     {
         _studyComplete = true;
         playerMovement.Pause();
-        SaveResults();
 
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.AppendLine($"═══════════════════════════════════════════");
         sb.AppendLine($"  STUDY COMPLETE — PARTICIPANT {participantID}");
         sb.AppendLine($"═══════════════════════════════════════════");
         sb.AppendLine($"  Total trials completed: {_results.Count}");
-        sb.AppendLine($"  Results saved to CSV.");
         sb.AppendLine($"───────────────────────────────────────────");
         sb.AppendLine($"  Response summary:");
 
-        var groups = new System.Collections.Generic.Dictionary
-            <string, System.Collections.Generic.List<float>>();
+        var groups = new Dictionary<string, List<float>>();
         foreach (var r in _results)
         {
             if (!groups.ContainsKey(r.Condition))
-                groups[r.Condition] = new System.Collections.Generic.List<float>();
-            if (r.Responded)
+                groups[r.Condition] = new List<float>();
+            if (r.Responded && r.Completed)
                 groups[r.Condition].Add(r.ResponseTime);
         }
 
         foreach (var kvp in groups)
         {
-            float avg = kvp.Value.Count > 0
-                ? kvp.Value[0] : 0f;
             float sum = 0f;
             foreach (var v in kvp.Value) sum += v;
-            avg = kvp.Value.Count > 0 ? sum / kvp.Value.Count : 0f;
-
+            float avg = kvp.Value.Count > 0 ? sum / kvp.Value.Count : 0f;
             sb.AppendLine($"  {kvp.Key,-22} " +
-                        $"Responded: {kvp.Value.Count}/{trialsPerCondition} " +
-                        $"| Avg RT: {avg:F3}s");
+                          $"Responded: {kvp.Value.Count}/{trialsPerCondition} " +
+                          $"| Avg RT: {avg:F3}s");
         }
 
         sb.AppendLine($"═══════════════════════════════════════════");
         Debug.Log(sb.ToString());
+
+        SaveResults();
     }
 
     // ------------------------------------------------------------------
-    // Trial sequence 
+    // Trial sequence
     // ------------------------------------------------------------------
-
-    // private void BuildTrialSequence()
-    // {
-    //     var conditions = new List<HazardHighlightManager.HighlightCondition>
-    //     {
-    //         HazardHighlightManager.HighlightCondition.ObjectOutline,
-    //         HazardHighlightManager.HighlightCondition.PeripheralHalo,
-    //         HazardHighlightManager.HighlightCondition.DepthColour,
-    //         HazardHighlightManager.HighlightCondition.DirectionalBeam
-    //     };
-
-    //     int offset  = (participantID - 1) % conditions.Count;
-    //     var ordered = new List<HazardHighlightManager.HighlightCondition>();
-    //     for (int i = 0; i < conditions.Count; i++)
-    //         ordered.Add(conditions[(i + offset) % conditions.Count]);
-
-    //     _trialSequence = new List<HazardHighlightManager.HighlightCondition>();
-    //     foreach (var cond in ordered)
-    //         for (int t = 0; t < trialsPerCondition; t++)
-    //             _trialSequence.Add(cond);
-    // }
-
-    private void LogTrialProgress(int trialIndex,
-    HazardHighlightManager.HighlightCondition condition)
-    {
-        int block        = (trialIndex / 4) + 1;
-        int posInBlock   = (trialIndex % 4) + 1;
-        int remaining    = _trialSequence.Count - trialIndex - 1;
-
-        // Count how many of each condition have been completed so far.
-        var counts = new System.Collections.Generic.Dictionary
-            <HazardHighlightManager.HighlightCondition, int>();
-        foreach (var c in System.Enum.GetValues(
-            typeof(HazardHighlightManager.HighlightCondition)))
-        {
-            var cond = (HazardHighlightManager.HighlightCondition)c;
-            if (cond == HazardHighlightManager.HighlightCondition.None) continue;
-            counts[cond] = 0;
-        }
-        for (int i = 0; i < trialIndex; i++)
-            if (counts.ContainsKey(_trialSequence[i]))
-                counts[_trialSequence[i]]++;
-
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"───────────────────────────────────────────");
-        sb.AppendLine($"  ▶ TRIAL {trialIndex + 1} / {_trialSequence.Count} " +
-                    $"| Block {block} | Position {posInBlock}/4");
-        sb.AppendLine($"  Condition: {condition}");
-        sb.AppendLine($"  Trials remaining: {remaining}");
-        sb.AppendLine($"  Condition counts so far:");
-        foreach (var kvp in counts)
-            sb.AppendLine($"    {kvp.Key,-20} {kvp.Value,2} / {trialsPerCondition}");
-        sb.AppendLine($"───────────────────────────────────────────");
-        Debug.Log(sb.ToString());
-    }
 
     private void BuildTrialSequence()
     {
         _trialSequence = GenerateBalancedSequence(participantID);
 
-        // Print full sequence in a readable format.
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.AppendLine($"═══════════════════════════════════════════");
         sb.AppendLine($"  PARTICIPANT {participantID} — TRIAL SEQUENCE");
         sb.AppendLine($"═══════════════════════════════════════════");
@@ -305,18 +293,18 @@ public class TrialControllerScenario2 : MonoBehaviour
 
         for (int i = 0; i < _trialSequence.Count; i++)
         {
-            int block = (i / 4) + 1;
+            int block      = (i / 4) + 1;
             int posInBlock = (i % 4) + 1;
             sb.AppendLine($"  Trial {i + 1,2} | Block {block,2} | " +
-                        $"Position {posInBlock} | {_trialSequence[i]}");
+                          $"Position {posInBlock} | {_trialSequence[i]}");
         }
 
         sb.AppendLine($"═══════════════════════════════════════════");
         Debug.Log(sb.ToString());
     }
 
-    
-    private List<HazardHighlightManager.HighlightCondition> GenerateBalancedSequence(int pID)
+    private List<HazardHighlightManager.HighlightCondition> GenerateBalancedSequence(
+        int pID)
     {
         var conditions = new List<HazardHighlightManager.HighlightCondition>
         {
@@ -326,27 +314,19 @@ public class TrialControllerScenario2 : MonoBehaviour
             HazardHighlightManager.HighlightCondition.DirectionalBeam
         };
 
-        // --- Step 1: Assign a Latin square row to this participant ---
-        // Guarantees every condition order appears evenly across participants.
-        // 4 conditions = 4 unique starting offsets, repeating every 4 participants.
-        int offset = (pID - 1) % conditions.Count;
-        var orderedConditions = new List<HazardHighlightManager.HighlightCondition>();
+        int offset  = (pID - 1) % conditions.Count;
+        var ordered = new List<HazardHighlightManager.HighlightCondition>();
         for (int i = 0; i < conditions.Count; i++)
-            orderedConditions.Add(conditions[(i + offset) % conditions.Count]);
+            ordered.Add(conditions[(i + offset) % conditions.Count]);
 
-        // --- Step 2: Build blocks of 4 (one of each condition per block) ---
-        // With 10 trials per condition and 4 conditions = 40 trials total.
-        // Divide into 10 blocks of 4, each containing all 4 conditions once.
         var blocks = new List<List<HazardHighlightManager.HighlightCondition>>();
         for (int b = 0; b < trialsPerCondition; b++)
         {
-            var block = new List<HazardHighlightManager.HighlightCondition>(orderedConditions);
-            // Shuffle within each block using a deterministic seed per participant + block.
+            var block = new List<HazardHighlightManager.HighlightCondition>(ordered);
             block = SeededShuffle(block, pID * 100 + b);
             blocks.Add(block);
         }
 
-        // --- Step 3: Flatten blocks into final sequence ---
         var sequence = new List<HazardHighlightManager.HighlightCondition>();
         foreach (var block in blocks)
             foreach (var cond in block)
@@ -359,9 +339,7 @@ public class TrialControllerScenario2 : MonoBehaviour
         List<HazardHighlightManager.HighlightCondition> input, int seed)
     {
         var result = new List<HazardHighlightManager.HighlightCondition>(input);
-
-        // Use System.Random with a fixed seed for deterministic shuffling.
-        var rng = new System.Random(seed);
+        var rng    = new System.Random(seed);
         for (int i = result.Count - 1; i > 0; i--)
         {
             int j = rng.Next(0, i + 1);
@@ -369,27 +347,64 @@ public class TrialControllerScenario2 : MonoBehaviour
         }
         return result;
     }
+
     // ------------------------------------------------------------------
-    // CSV logging
+    // Logging
+    // ------------------------------------------------------------------
+
+    private void LogTrialProgress(int trialIndex,
+        HazardHighlightManager.HighlightCondition condition)
+    {
+        int block        = (trialIndex / 4) + 1;
+        int posInBlock   = (trialIndex % 4) + 1;
+        int remaining    = _trialSequence.Count - trialIndex - 1;
+
+        var counts = new Dictionary
+            <HazardHighlightManager.HighlightCondition, int>();
+        foreach (HazardHighlightManager.HighlightCondition c in
+            System.Enum.GetValues(
+                typeof(HazardHighlightManager.HighlightCondition)))
+        {
+            if (c == HazardHighlightManager.HighlightCondition.None) continue;
+            counts[c] = 0;
+        }
+        for (int i = 0; i < trialIndex; i++)
+            if (counts.ContainsKey(_trialSequence[i]))
+                counts[_trialSequence[i]]++;
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"───────────────────────────────────────────");
+        sb.AppendLine($"  ▶ TRIAL {trialIndex + 1} / {_trialSequence.Count} " +
+                      $"| Block {block} | Position {posInBlock}/4");
+        sb.AppendLine($"  Condition: {condition}");
+        sb.AppendLine($"  Trials remaining: {remaining}");
+        sb.AppendLine($"  Condition counts so far:");
+        foreach (var kvp in counts)
+            sb.AppendLine($"    {kvp.Key,-20} {kvp.Value,2} / {trialsPerCondition}");
+        sb.AppendLine($"───────────────────────────────────────────");
+        Debug.Log(sb.ToString());
+    }
+
+    // ------------------------------------------------------------------
+    // CSV
     // ------------------------------------------------------------------
 
     private void SaveResults()
     {
-        string folder = Application.persistentDataPath;
-        string path   = Path.Combine(folder,
-            $"HazardStudy_S2_P{participantID}_" +
-            $"{System.DateTime.Now:yyyyMMdd_HHmmss}.csv");
+        if (string.IsNullOrEmpty(_saveFilePath)) return;
 
         var sb = new StringBuilder();
         sb.AppendLine("ParticipantID,TrialNumber,Condition,TrialWithinCondition," +
-                      "ResponseTime_s,Responded");
+                      "ResponseTime_s,Responded,Completed");
 
         foreach (var r in _results)
             sb.AppendLine($"{r.ParticipantID},{r.TrialNumber},{r.Condition}," +
-                          $"{r.TrialWithinCondition},{r.ResponseTime:F4},{r.Responded}");
+                          $"{r.TrialWithinCondition}," +
+                          $"{(r.ResponseTime < 0 ? "N/A" : r.ResponseTime.ToString("F4"))}," +
+                          $"{r.Responded},{r.Completed}");
 
-        File.WriteAllText(path, sb.ToString());
-        Debug.Log($"[Scenario2] Results saved to: {path}");
+        File.WriteAllText(_saveFilePath, sb.ToString());
+        Debug.Log($"[Scenario2] Saved {_results.Count} rows to: {_saveFilePath}");
     }
 
     // ------------------------------------------------------------------
@@ -402,6 +417,7 @@ public class TrialControllerScenario2 : MonoBehaviour
         public int    TrialWithinCondition;
         public float  ResponseTime;
         public bool   Responded;
+        public bool   Completed;
     }
 
     // ------------------------------------------------------------------

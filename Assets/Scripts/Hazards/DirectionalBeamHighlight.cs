@@ -7,31 +7,16 @@ public class DirectionalBeamHighlight : MonoBehaviour
     public Camera playerCamera;
 
     [Header("Beam Appearance")]
-    //public Color beamColour = new Color(1f, 0.85f, 0.1f, 1f); //yellow
-    public Color beamColour = new Color(1f, 0.15f, 0.15f, 1f);   // red beam
-
-    // [Tooltip("Thickness of each segment.")]
-    // public float beamWidth = 0.05f;
-
-    // [Tooltip("Total length of the beam in world units.")]
-    // public float beamLength = 8f;
-
-    // [Tooltip("Number of segments in the line strip.")]
-    // [Range(2, 20)]
-    // public int segmentCount = 6;
+    public Color beamColour = new Color(1f, 0.15f, 0.15f, 1f);
 
     public float beamLength   = 30f;
-    public float segmentCount = 20;
+    public int   segmentCount = 20;
     public float beamWidth    = 0.12f;
-
-    [Header("Animation")]
-    [Range(0f, 5f)]
-    public float pulseSpeed = 1.5f;
 
     // ------------------------------------------------------------------
 
-    private List<GameObject> _segments    = new List<GameObject>();
-    private List<Material>   _materials   = new List<Material>();
+    private List<GameObject> _segments  = new List<GameObject>();
+    private List<Material>   _materials = new List<Material>();
     private bool             _isActive;
 
     // ------------------------------------------------------------------
@@ -47,8 +32,8 @@ public class DirectionalBeamHighlight : MonoBehaviour
 
     private void OnDestroy()
     {
-        foreach (var s in _segments)  if (s != null)  Destroy(s);
-        foreach (var m in _materials) if (m != null)  Destroy(m);
+        foreach (var s in _segments)  if (s != null) Destroy(s);
+        foreach (var m in _materials) if (m != null) Destroy(m);
     }
 
     // ------------------------------------------------------------------
@@ -71,33 +56,27 @@ public class DirectionalBeamHighlight : MonoBehaviour
     {
         if (!_isActive || _segments.Count == 0) return;
 
-        Vector3 dirToPlayer  = (playerCamera.transform.position
-                                - transform.position).normalized;
+        Vector3 dirToPlayer = (playerCamera.transform.position
+                               - transform.position).normalized;
 
-        float segmentLength  = beamLength / segmentCount;
-
-        // Pulse alpha — fades each segment progressively toward player.
-        float pulse = (pulseSpeed > 0f)
-            ? Mathf.Lerp(0.3f, 1f,
-                (Mathf.Sin(Time.time * pulseSpeed * 2f * Mathf.PI) + 1f) * 0.5f)
-            : 1f;
+        float segmentLength = beamLength / segmentCount;
 
         for (int i = 0; i < _segments.Count; i++)
         {
-            // Position each segment along the beam direction.
             float   distAlongBeam = (i + 0.5f) * segmentLength;
             Vector3 segPos        = transform.position
                                     + dirToPlayer * distAlongBeam;
 
-            _segments[i].transform.position = segPos;
-            _segments[i].transform.rotation = Quaternion.LookRotation(dirToPlayer);
+            _segments[i].transform.position  = segPos;
+            _segments[i].transform.rotation  = Quaternion.LookRotation(dirToPlayer);
             _segments[i].transform.localScale = new Vector3(
-                beamWidth, beamWidth, segmentLength * 0.85f); // slight gap between segments
+                beamWidth, beamWidth, segmentLength * 1.02f);
 
-            // Fade alpha along beam — brightest at car, transparent at player end.
-            float t     = 1f - (float)i / segmentCount;
-            Color c     = beamColour;
-            c.a         = t * pulse;
+            // Fade alpha along beam — brightest at car end, transparent at player end.
+            // No pulse — constant solid beam.
+            float t = 1f - (float)i / segmentCount;
+            Color c = beamColour;
+            c.a     = t;
 
             if (_materials[i].HasProperty("_BaseColor"))
                 _materials[i].SetColor("_BaseColor", c);
@@ -119,7 +98,7 @@ public class DirectionalBeamHighlight : MonoBehaviour
             seg.transform.SetParent(transform, false);
             Destroy(seg.GetComponent<BoxCollider>());
 
-            var mat  = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+            var mat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
             if (mat.HasProperty("_BaseColor"))
                 mat.SetColor("_BaseColor", beamColour);
             else
