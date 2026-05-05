@@ -91,18 +91,20 @@ public class RoadEnvironment : MonoBehaviour
                 new Vector3(-sideOffset, height * 0.5f, z),
                 new Vector3(width, height, depth),
                 buildingMaterial,
-                new Color(Random.Range(0.4f, 0.75f),
-                           Random.Range(0.4f, 0.75f),
-                           Random.Range(0.4f, 0.75f)));
+                // new Color(Random.Range(0.4f, 0.75f),
+                //            Random.Range(0.4f, 0.75f),
+                //            Random.Range(0.4f, 0.75f)));
+                new Color(0.6f, 0.6f, 0.6f));  // neutral grey
 
             // Right side
             CreateBox($"Building_R_{i}",
                 new Vector3(sideOffset, height * 0.5f, z),
                 new Vector3(width, height, depth),
                 buildingMaterial,
-                new Color(Random.Range(0.4f, 0.75f),
-                           Random.Range(0.4f, 0.75f),
-                           Random.Range(0.4f, 0.75f)));
+                // new Color(Random.Range(0.4f, 0.75f),
+                //            Random.Range(0.4f, 0.75f),
+                //            Random.Range(0.4f, 0.75f)));
+                new Color(0.6f, 0.6f, 0.6f));  // neutral grey
         }
     }
 

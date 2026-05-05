@@ -26,18 +26,18 @@ public class DepthColourHighlight : MonoBehaviour
 
     [Header("Distance Range")]
     [Tooltip("Distance at which the hazard shows the 'near' (danger) colour.")]
-    public float nearDistance = 8f;
+    public float nearDistance = 15f;
 
     [Tooltip("Distance at which the hazard shows the 'far' (safe) colour.")]
-    public float farDistance  = 40f;
+    public float farDistance  = 60f;
 
     [Header("Colour Mapping")]
     [Tooltip("Colour displayed when the hazard is at or closer than nearDistance.")]
-    public Color nearColour = new Color(1f, 0.1f, 0.05f, 1f);   // red
+    public Color nearColour = new Color(0.8f, 0.0f, 0.0f, 1f);   // dark red when close
 
     [Tooltip("Colour displayed when the hazard is at or further than farDistance.")]
-    public Color farColour  = new Color(0.1f, 0.4f, 1f,  1f);   // blue
-
+    public Color farColour  = new Color(1.0f, 0.9f, 0.9f, 1f); // bright pale pink-red when far
+    
     [Header("Emission")]
     [Tooltip("Enable emission intensity modulation (requires emission on the material).")]
     public bool modulateEmission = true;

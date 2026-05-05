@@ -2,9 +2,9 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// Condition 2: Peripheral Halo Highlight (Full Rewrite)
+/// Condition 2: Peripheral Halo Highlight
 /// Creates its own Canvas and ring UI entirely in code.
-/// No manual Canvas/RawImage setup required in the Inspector.
+/// Updated for VR compatibility using Screen Space Camera render mode.
 /// Attach to the hazard vehicle body.
 /// </summary>
 public class PeripheralHaloHighlight : MonoBehaviour
@@ -21,10 +21,6 @@ public class PeripheralHaloHighlight : MonoBehaviour
     [Tooltip("Thickness of the ring (0.1 = thin, 0.4 = thick).")]
     [Range(0.05f, 0.5f)]
     public float ringThickness = 0.25f;
-
-    [Tooltip("How close to the screen edge the ring sits (0.7 = near centre, 0.95 = near edge).")]
-    [Range(0.5f, 0.99f)]
-    public float edgeProximity = 0.88f;
 
     [Tooltip("Pulse frequency in Hz (0 = no pulse).")]
     [Range(0f, 5f)]
@@ -67,6 +63,14 @@ public class PeripheralHaloHighlight : MonoBehaviour
     public void Activate()
     {
         _isActive = true;
+        // Re-assign camera in case it changed (e.g. after XR rig conversion).
+        if (playerCamera == null)
+            playerCamera = Camera.main;
+
+        // Update canvas camera reference.
+        if (_canvas != null && _canvas.renderMode == RenderMode.ScreenSpaceCamera)
+            _canvas.worldCamera = playerCamera;
+
         SetVisible(true);
     }
 
@@ -78,67 +82,11 @@ public class PeripheralHaloHighlight : MonoBehaviour
 
     // ------------------------------------------------------------------
 
-//    private void Update()
-//     {
-//         if (!_isActive || _ringImage == null) return;
-
-//         // --- 1. Get viewport position of this hazard. ---
-//         Vector3 vp       = playerCamera.WorldToViewportPoint(transform.position);
-//         bool    isBehind = vp.z < 0f;
-
-//         if (isBehind)
-//         {
-//             vp.x = 1f - vp.x;
-//             vp.y = 1f - vp.y;
-//         }
-
-//         // --- 2. Direction from screen centre to hazard in viewport space. ---
-//         Vector2 vpDir          = new Vector2(vp.x - 0.5f, vp.y - 0.5f);
-//         float   distFromCentre = vpDir.magnitude / 0.5f; // 0=centre, 1=edge
-
-//         if (vpDir.magnitude > 0.001f)
-//             vpDir.Normalize();
-//         else
-//             vpDir = Vector2.right;
-
-//         // --- 3. Convert to screen pixels and place ring at edge. ---
-//         // Clamp direction to screen rectangle edge, then pull in by edgeProximity.
-//         float hw = Screen.width  * 0.5f;
-//         float hh = Screen.height * 0.5f;
-
-//         // Find the scale factor to reach the screen edge in this direction.
-//         float scaleToEdge = Mathf.Min(
-//             Mathf.Abs(vpDir.x) > 0.001f ? hw / Mathf.Abs(vpDir.x * hw) : float.MaxValue,
-//             Mathf.Abs(vpDir.y) > 0.001f ? hh / Mathf.Abs(vpDir.y * hh) : float.MaxValue
-//         );
-
-//         Vector2 ringPos      = new Vector2(vpDir.x * hw, vpDir.y * hh)
-//                             * edgeProximity;
-//         _ringRT.anchoredPosition = ringPos;
-
-//         // --- 4. Pulse + fade when hazard is near screen centre. ---
-//         float pulse = (pulseFrequency > 0f)
-//             ? Mathf.Lerp(0.3f, 1f,
-//                 (Mathf.Sin(Time.time * pulseFrequency * 2f * Mathf.PI) + 1f) * 0.5f)
-//             : 1f;
-
-//         // Only show ring when hazard is peripheral (not when directly visible).
-//         float vpX = vp.x;
-//         bool isPeripheral = vpX < 0.45f || vpX > 0.55f;
-//         float peripheralStrength = isPeripheral
-//             ? Mathf.Clamp01((distFromCentre - 0.05f) * 2f)
-//             : 0f;
-//         float visibility = peripheralStrength;
-
-//         Color c = ringColour;
-//         c.a = pulse * visibility;
-//         _ringImage.color = c;
-//     }
     private void Update()
     {
-        if (!_isActive || _ringImage == null) return;
+        if (!_isActive || _ringImage == null || playerCamera == null) return;
 
-        // Convert hazard world position to screen position.
+        // Convert hazard world position to screen position using camera pixel dims.
         Vector3 screenPos = playerCamera.WorldToScreenPoint(transform.position);
 
         // Don't show if behind camera.
@@ -148,10 +96,21 @@ public class PeripheralHaloHighlight : MonoBehaviour
             return;
         }
 
-        // Convert screen position to canvas anchored position.
-        float hw = Screen.width  * 0.5f;
-        float hh = Screen.height * 0.5f;
+        // Use camera pixel dimensions instead of Screen for VR compatibility.
+        float hw = playerCamera.pixelWidth  * 0.5f;
+        float hh = playerCamera.pixelHeight * 0.5f;
         _ringRT.anchoredPosition = new Vector2(screenPos.x - hw, screenPos.y - hh);
+
+        // Scale ring based on distance — bigger when closer.
+        float dist    = Vector3.Distance(playerCamera.transform.position, transform.position);
+        float minDist = 3f;
+        float maxDist = 40f;
+        float minSize = ringDiameter;
+        float maxSize = ringDiameter * 4f;
+
+        float t        = 1f - Mathf.Clamp01((dist - minDist) / (maxDist - minDist));
+        float ringSize = Mathf.Lerp(minSize, maxSize, Mathf.SmoothStep(0f, 1f, t));
+        _ringRT.sizeDelta = new Vector2(ringSize, ringSize);
 
         // Pulse alpha.
         float pulse = (pulseFrequency > 0f)
@@ -163,55 +122,60 @@ public class PeripheralHaloHighlight : MonoBehaviour
         c.a = pulse;
         _ringImage.color = c;
     }
+
     // ------------------------------------------------------------------
 
     private void CreateCanvas()
     {
         _canvasGO = new GameObject($"{name}_HaloCanvas");
-        // Do NOT parent to this transform — keep in world/screen space.
 
-        _canvas                  = _canvasGO.AddComponent<Canvas>();
-        _canvas.renderMode       = RenderMode.ScreenSpaceOverlay;
-        _canvas.sortingOrder     = 10;
+        _canvas            = _canvasGO.AddComponent<Canvas>();
 
-        var scaler               = _canvasGO.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode       = CanvasScaler.ScaleMode.ConstantPixelSize;
+        // Use Screen Space Camera for VR compatibility.
+        // Screen Space Overlay does not work correctly in VR headsets.
+        _canvas.renderMode  = RenderMode.ScreenSpaceCamera;
+        _canvas.worldCamera = playerCamera;
+        _canvas.planeDistance = 0.5f;
+        _canvas.sortingOrder  = 10;
+
+        var scaler                    = _canvasGO.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode            = CanvasScaler.ScaleMode.ConstantPixelSize;
+        scaler.scaleFactor            = 1f;
+        scaler.referencePixelsPerUnit = 100f;
 
         _canvasGO.AddComponent<GraphicRaycaster>();
     }
 
     private void CreateRingImage()
     {
-        // Build ring texture.
         _ringTexture = BuildRingTexture();
 
-        // Create RawImage GameObject inside the canvas.
-        var imageGO  = new GameObject($"{name}_Ring");
+        var imageGO = new GameObject($"{name}_Ring");
         imageGO.transform.SetParent(_canvasGO.transform, false);
 
         _ringImage         = imageGO.AddComponent<RawImage>();
         _ringImage.texture = _ringTexture;
         _ringImage.color   = ringColour;
 
-        _ringRT                    = _ringImage.rectTransform;
-        _ringRT.anchorMin          = new Vector2(0.5f, 0.5f);
-        _ringRT.anchorMax          = new Vector2(0.5f, 0.5f);
-        _ringRT.pivot              = new Vector2(0.5f, 0.5f);
-        _ringRT.sizeDelta          = new Vector2(ringDiameter, ringDiameter);
-        _ringRT.anchoredPosition   = Vector2.zero;
+        _ringRT                  = _ringImage.rectTransform;
+        _ringRT.anchorMin        = new Vector2(0.5f, 0.5f);
+        _ringRT.anchorMax        = new Vector2(0.5f, 0.5f);
+        _ringRT.pivot            = new Vector2(0.5f, 0.5f);
+        _ringRT.sizeDelta        = new Vector2(ringDiameter, ringDiameter);
+        _ringRT.anchoredPosition = Vector2.zero;
     }
 
     private Texture2D BuildRingTexture()
     {
-        int     size    = textureResolution;
-        var     tex     = new Texture2D(size, size, TextureFormat.RGBA32, false);
-        tex.wrapMode    = TextureWrapMode.Clamp;
-        tex.filterMode  = FilterMode.Bilinear;
+        int   size    = textureResolution;
+        var   tex     = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.wrapMode  = TextureWrapMode.Clamp;
+        tex.filterMode = FilterMode.Bilinear;
 
-        Color[] pixels  = new Color[size * size];
-        float   half    = size * 0.5f;
-        float   outerR  = half;
-        float   innerR  = half * (1f - ringThickness);
+        Color[] pixels = new Color[size * size];
+        float   half   = size * 0.5f;
+        float   outerR = half;
+        float   innerR = half * (1f - ringThickness);
         float   feather = half * 0.1f;
 
         for (int y = 0; y < size; y++)

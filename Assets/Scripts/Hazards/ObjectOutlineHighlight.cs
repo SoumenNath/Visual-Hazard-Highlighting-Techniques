@@ -153,11 +153,10 @@ Shader ""Hidden/HazardOutline""
         // so the outline thickness is consistent regardless of object size.
         Vector3 parentScale = transform.localScale;
         _outlineObject.transform.localScale = new Vector3(
-            1f + outlineWidth / parentScale.x,
-            1f + outlineWidth / parentScale.y,
-            1f + outlineWidth / parentScale.z
-        );
-
+            1f + (outlineWidth * 0.1f) / parentScale.x,
+            1f + (outlineWidth * 0.1f) / parentScale.y,
+            1f + (outlineWidth * 0.1f) / parentScale.z);
+        
         var srcFilter = GetComponentInChildren<MeshFilter>();
         if (srcFilter != null)
         {
