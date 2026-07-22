@@ -1,0 +1,753 @@
+---
+title: "VR Hazard Highlighting Study - Mixed Methods Analysis Report"
+author: "Study Analysis"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: flatly
+    highlight: tango
+    fig_caption: true
+    number_sections: true
+  pdf_document:
+    toc: true
+    toc_depth: '3'
+subtitle: Integrating Quantitative Response Time Data with Qualitative Survey Findings
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  fig.width = 8,
+  fig.height = 5
+)
+
+required <- c("readxl","dplyr","tidyr","ez","rstatix",
+              "ggplot2","knitr","kableExtra","scales")
+new_pkg  <- required[!(required %in% installed.packages()[,"Package"])]
+if (length(new_pkg)) install.packages(new_pkg, quiet = TRUE)
+
+library(readxl); library(dplyr); library(tidyr); library(ez)
+library(rstatix); library(ggplot2); library(knitr)
+library(kableExtra); library(scales)
+```
+
+```{r load-quant, include=FALSE}
+# ── Load quantitative response time data ──────────────────────────
+file_path   <- "Particpants_File.xlsx"
+sheet_names <- excel_sheets(file_path)
+
+all_data <- lapply(seq_along(sheet_names), function(i) {
+  df <- read_excel(file_path, sheet = sheet_names[i])
+  df$ParticipantID <- i
+  df
+})
+data <- bind_rows(all_data)
+if ("Completed" %in% names(data)) data <- data %>% filter(Completed == TRUE)
+data <- data %>%
+  filter(Responded == TRUE, ResponseTime_s != 10.0) %>%
+  mutate(ResponseTime_s = as.numeric(ResponseTime_s),
+         ParticipantID  = as.factor(ParticipantID),
+         Condition      = as.factor(Condition)) %>%
+  filter(!is.na(ResponseTime_s))
+
+means <- data %>%
+  group_by(ParticipantID, Condition) %>%
+  summarise(MeanRT = mean(ResponseTime_s), .groups = "drop")
+
+desc_stats <- means %>%
+  group_by(Condition) %>%
+  summarise(
+    N        = n(),
+    Mean     = mean(MeanRT),
+    SD       = sd(MeanRT),
+    CI_lower = mean(MeanRT) - qt(0.975, n()-1) * sd(MeanRT)/sqrt(n()),
+    CI_upper = mean(MeanRT) + qt(0.975, n()-1) * sd(MeanRT)/sqrt(n()),
+    .groups  = "drop"
+  )
+
+# Run RM ANOVA for key stats
+anova_result <- ezANOVA(data=means, dv=MeanRT, wid=ParticipantID,
+                         within=Condition, detailed=TRUE, type=3)
+F_val  <- round(anova_result$ANOVA$F[1], 3)
+df1    <- anova_result$ANOVA$DFn[1]
+df2    <- anova_result$ANOVA$DFd[1]
+p_gg   <- round(anova_result$`Sphericity Corrections`$`p[GG]`[1], 6)
+ges    <- round(anova_result$ANOVA$ges[1], 4)
+
+posthoc <- means %>%
+  pairwise_t_test(MeanRT ~ Condition, paired=TRUE, p.adjust.method="bonferroni")
+
+cond_colours <- c(
+  DepthColour     = "#1F3864",
+  DirectionalBeam = "#2E75B6",
+  ObjectOutline   = "#70AD47",
+  PeripheralHalo  = "#ED7D31"
+)
+cond_labels <- c(
+  DepthColour     = "Depth Colour",
+  DirectionalBeam = "Directional Beam",
+  ObjectOutline   = "Object Outline",
+  PeripheralHalo  = "Peripheral Halo"
+)
+```
+
+```{r define-qualitative, include=FALSE}
+# ── Qualitative data manually extracted from Qualtrics CSV ────────
+
+# Demographics
+age_data    <- data.frame(Range=c("18-24","25-34"), Count=c(8,4),
+                           Pct=c("67%","33%"))
+gender_data <- data.frame(Gender=c("Male","Female","Non-binary"),
+                           Count=c(4,7,1), Pct=c("33%","58%","8%"))
+vr_data     <- data.frame(
+  Experience = c("Never used VR","Used once or twice",
+                 "Used several times","Very comfortable (20+ times)"),
+  Count      = c(1, 5, 5, 1),
+  Pct        = c("8%","42%","42%","8%")
+)
+
+# Q4 effectiveness ranking (rank 1 = most effective)
+# weighted mean rank: sum(rank * count) / total
+# Using cleaner block of data from CSV
+effectiveness_df <- data.frame(
+  Condition = c("Object Outline","Object Outline","Object Outline","Object Outline",
+                "Peripheral Halo","Peripheral Halo","Peripheral Halo",
+                "Color Varying","Color Varying","Color Varying","Color Varying",
+                "Directional Beam","Directional Beam","Directional Beam","Directional Beam"),
+  Rank      = c(1,2,3,4, 1,2,3, 1,2,3,4, 1,2,3,4),
+  Count     = c(4,3,2,1, 0,7,4, 5,1,2,4, 3,7,1,1)
+)
+
+eff_summary <- effectiveness_df %>%
+  group_by(Condition) %>%
+  summarise(
+    WeightedMean = sum(Rank * Count) / sum(Count),
+    MostEffective = Count[Rank==1],
+    .groups = "drop"
+  ) %>%
+  arrange(WeightedMean)
+
+# Q7 preference ranking (rank 1 = most preferred)
+preference_df <- data.frame(
+  Condition = c("Object Outline","Object Outline","Object Outline","Object Outline",
+                "Peripheral Halo","Peripheral Halo","Peripheral Halo",
+                "Color Varying","Color Varying","Color Varying","Color Varying",
+                "Directional Beam","Directional Beam","Directional Beam","Directional Beam"),
+  Rank      = c(1,2,3,4, 1,2,3, 1,2,3,4, 1,2,3,4),
+  Count     = c(5,1,2,1, 0,8,3, 0,3,6,4, 7,4,0,1)
+)
+
+pref_summary <- preference_df %>%
+  group_by(Condition) %>%
+  summarise(
+    WeightedMean = sum(Rank * Count) / sum(Count),
+    MostPreferred = Count[Rank==1],
+    .groups = "drop"
+  ) %>%
+  arrange(WeightedMean)
+
+# Map survey names to RT condition names
+name_map <- c(
+  "Object Outline"   = "ObjectOutline",
+  "Peripheral Halo"  = "PeripheralHalo",
+  "Color Varying"    = "DepthColour",
+  "Directional Beam" = "DirectionalBeam"
+)
+
+# Q5 most preferred open text
+most_pref_responses <- list(
+  ObjectOutline = list(
+    count = 6,
+    theme_clarity  = c(
+      "I preferred the object outline, I think it was the clearest at showing where a complete object was, and it was a lot easier for me to tell where the object was in relation to the other objects in the scene.",
+      "I liked the object outline as it was very obvious which was the problem and was quicker to identify.",
+      "Object outline because the outline was more obvious to me. Color varying highlight was less obvious to me until some time passed."
+    ),
+    theme_balance  = c(
+      "I would prefer the object outline because it felt like it had a good balance between being easy to spot without being overly distracting. The color varying highlight was also good, though having the whole thing turn red might sometimes be distracting while driving.",
+      "the outline I found looked visually pleasing"
+    )
+  ),
+  DepthColour = list(
+    count = 5,
+    theme_subtlety = c(
+      "I would prefer the colour varying highlight because I found it easier to identify and was much more subtle when it came to screen.",
+      "Probably the outline (color varying highlight) as it is decently effective without being distracting or shocking",
+      "The one where the car turned red. The others were too visually overwhelming"
+    ),
+    theme_differentiation = c(
+      "I think the colour varying would be my most prefered because it helps differentiate better incase i see cars of the same colour cause not everyone might notice the outline immediately",
+      "object colour change because it shows me where the hazard is and is pretty noticeable"
+    )
+  ),
+  DirectionalBeam = list(
+    count = 1,
+    theme_moderate = c(
+      "I like the directional light beam but I perceived it as a highlight with a red box beneath the car which made it more effective than the regular highlight but not as distracting as the halo."
+    )
+  )
+)
+
+# Q6 least preferred open text
+least_pref_responses <- list(
+  PeripheralHalo = list(
+    count = 9,
+    theme_unclear = c(
+      "I would least prefer the peripheral halo, because although it was easy to identify, it was difficult to tell which car in particular was the hazard which might make it difficult to decide how to respond.",
+      "the peripheral halo was very alarming and didn't tell me what the hazard was.",
+      "the halo would probably be very distacting and also not tell me where the danger is",
+      "Peripheral halo, because it was unclear to me where the hazard was coming from compared to object outline and color varying highlight, which made a specific threat more obvious rather than generalizing"
+    ),
+    theme_distraction = c(
+      "the peripheral halo it kind of obstructs my field of view and disorients me",
+      "I would least prefer the peripheral halo because it was abruptive to my vision and I found it fairly distracting whenever it came to screen.",
+      "The peripheral halo, every time it came up it startled me and distracted from the road",
+      "The large circle that appeared. It kind of scared me."
+    ),
+    theme_size = c(
+      "The dot was too small"
+    )
+  ),
+  DepthColour = list(
+    count = 2,
+    theme_subtlety = c(
+      "The colour varying highlight was a little tricky to notice as quickly. I suppose it depends on how severe the hazard is, but I feel like I would double-guess myself if I was unsure if I saw it or not if it's too light for a small hazard. That kind of doubt wouldn't be good during driving.",
+      "colour varying, it's not as obvious while driving to me."
+    )
+  ),
+  DirectionalBeam = list(
+    count = 1,
+    theme_misc = c("Directional Light Beam")
+  )
+)
+```
+
+---
+
+# Introduction
+
+This report presents a **mixed-methods analysis** of a within-subjects VR study comparing four hazard highlighting techniques. The quantitative component measured objective **response time** (RT) — how quickly participants detected an oncoming hazard vehicle. The qualitative component collected participant **survey responses** covering demographics, VR experience, technique rankings, and open-ended opinions.
+
+Integrating both data sources provides a more complete picture: response time tells us which techniques enabled the fastest detection, while survey responses reveal *why* participants responded as they did and which techniques they found most usable and acceptable.
+
+## Condition Names
+
+The survey used slightly different labels from the experiment code. The mapping throughout this report is:
+
+```{r name-mapping}
+mapping <- data.frame(
+  `Survey Label`      = c("Object Outline","Peripheral Halo",
+                            "Color Varying Highlight","Directional Light Beam"),
+  `Experiment Code`   = c("ObjectOutline","PeripheralHalo",
+                            "DepthColour","DirectionalBeam"),
+  `Description`       = c("Red outline around hazard vehicle",
+                            "Pulsing ring rendered over hazard",
+                            "Colour shifts from light to dark blue as vehicle approaches",
+                            "Solid beam pointing from hazard toward player"),
+  check.names = FALSE
+)
+kable(mapping, align=c("l","l","l"),
+      caption="Condition Name Mapping between Survey and Experiment") %>%
+  kable_styling(bootstrap_options=c("striped","hover","condensed"),
+                full_width=TRUE) %>%
+  column_spec(1, bold=TRUE) %>%
+  column_spec(2, color="grey40", italic=TRUE)
+```
+
+---
+
+# Participant Demographics
+
+```{r demographics, fig.height=3.5, fig.cap="Participant demographic breakdown across age, gender, and VR experience."}
+par(mfrow=c(1,3))
+
+# Age
+p_age <- ggplot(age_data, aes(x=Range, y=Count, fill=Range)) +
+  geom_bar(stat="identity", width=0.5, alpha=0.85) +
+  geom_text(aes(label=paste0(Count," (",Pct,")")),
+            vjust=-0.4, size=3.5, fontface="bold") +
+  scale_fill_manual(values=c("#2E75B6","#1F3864")) +
+  scale_y_continuous(limits=c(0,11), expand=expansion(mult=c(0,0.1))) +
+  labs(title="Age Range", x=NULL, y="Count") +
+  theme_minimal(base_size=11) +
+  theme(legend.position="none", panel.grid.major.x=element_blank())
+
+p_gender <- ggplot(gender_data, aes(x=reorder(Gender,-Count), y=Count, fill=Gender)) +
+  geom_bar(stat="identity", width=0.5, alpha=0.85) +
+  geom_text(aes(label=paste0(Count," (",Pct,")")),
+            vjust=-0.4, size=3.5, fontface="bold") +
+  scale_fill_manual(values=c("#ED7D31","#70AD47","#2E75B6")) +
+  scale_y_continuous(limits=c(0,10), expand=expansion(mult=c(0,0.1))) +
+  labs(title="Gender Identity", x=NULL, y="Count") +
+  theme_minimal(base_size=11) +
+  theme(legend.position="none", panel.grid.major.x=element_blank())
+
+p_vr <- ggplot(vr_data, aes(x=reorder(Experience, Count), y=Count, fill=Experience)) +
+  geom_bar(stat="identity", width=0.6, alpha=0.85) +
+  geom_text(aes(label=paste0(Count," (",Pct,")")),
+            hjust=-0.1, size=3.2, fontface="bold") +
+  coord_flip() +
+  scale_fill_manual(values=c("#1F3864","#2E75B6","#5B9BD5","#A9C6E0")) +
+  scale_x_discrete(labels=function(x) stringr::str_wrap(x, 20)) +
+  scale_y_continuous(limits=c(0,7.5), expand=expansion(mult=c(0,0.1))) +
+  labs(title="VR Experience", x=NULL, y="Count") +
+  theme_minimal(base_size=11) +
+  theme(legend.position="none", panel.grid.major.y=element_blank())
+
+library(gridExtra)
+grid.arrange(p_age, p_gender, p_vr, ncol=3)
+```
+
+```{r demo-table}
+demo_summary <- data.frame(
+  Characteristic = c("Total participants","Age: 18-24","Age: 25-34",
+                      "Gender: Female","Gender: Male","Gender: Non-binary",
+                      "VR: Never used","VR: Once or twice",
+                      "VR: Several times","VR: Very comfortable"),
+  N   = c(12, 8, 4, 7, 4, 1, 1, 5, 5, 1),
+  Pct = c("100%","67%","33%","58%","33%","8%","8%","42%","42%","8%")
+)
+
+kable(demo_summary, col.names=c("Characteristic","N","%"),
+      align=c("l","c","c"),
+      caption="Participant Demographic Summary (N = 12)") %>%
+  kable_styling(bootstrap_options=c("striped","hover","condensed"),
+                full_width=FALSE, position="left") %>%
+  group_rows("Age",        2, 3) %>%
+  group_rows("Gender",     4, 6) %>%
+  group_rows("VR Experience", 7, 10)
+```
+
+The sample was predominantly **young adults (67% aged 18-24)** and **female (58%)**. VR experience was mixed — 84% had used VR before, with most having used it a small number of times (once or twice, or several times). Only one participant reported being very comfortable with VR (20+ uses) and one had never used it. This distribution is relevant for interpreting the qualitative responses, as participants with limited VR experience may have found certain visual techniques more disorienting than more experienced users would.
+
+---
+
+# Technique Rankings
+
+Participants were asked to rank the four highlighting techniques on two dimensions: **perceived effectiveness** (Q4) and **personal preference** (Q7). Rankings were from 1 (best) to 4 (worst). Weighted mean ranks are computed as the average rank assigned across all participants — a lower score indicates a better ranking.
+
+## Perceived Effectiveness (Q4)
+
+```{r effectiveness-chart, fig.cap="Stacked bar chart showing how many participants assigned each rank to each technique for perceived effectiveness. Rank 1 = most effective."}
+eff_plot <- effectiveness_df %>%
+  mutate(
+    Condition = factor(Condition,
+                        levels=eff_summary$Condition),
+    Rank      = factor(Rank, levels=4:1,
+                        labels=c("Rank 4 (least)","Rank 3","Rank 2","Rank 1 (most)"))
+  )
+
+ggplot(eff_plot, aes(x=Condition, y=Count, fill=Rank)) +
+  geom_bar(stat="identity", width=0.6, colour="white") +
+  geom_text(aes(label=ifelse(Count>0, Count, "")),
+            position=position_stack(vjust=0.5), size=3.5,
+            colour="white", fontface="bold") +
+  scale_fill_manual(values=c("#FCE4D6","#F4B183","#C55A11","#833C00"),
+                    guide=guide_legend(reverse=TRUE)) +
+  coord_flip() +
+  labs(x=NULL, y="Number of Participants", fill="Ranking") +
+  theme_minimal(base_size=12) +
+  theme(panel.grid.major.y=element_blank())
+```
+
+```{r effectiveness-table}
+eff_table <- eff_summary %>%
+  left_join(
+    effectiveness_df %>% filter(Rank==1) %>% select(Condition, Count) %>%
+      rename(Rank1=Count), by="Condition") %>%
+  left_join(
+    effectiveness_df %>% filter(Rank==4) %>% select(Condition, Count) %>%
+      rename(Rank4=Count), by="Condition") %>%
+  mutate(
+    WeightedMean = round(WeightedMean, 2),
+    SurveyName   = Condition,
+    RTMean       = round(desc_stats$Mean[match(name_map[Condition],
+                                                desc_stats$Condition)], 3)
+  ) %>%
+  arrange(WeightedMean) %>%
+  select(SurveyName, WeightedMean, Rank1, Rank4, RTMean)
+
+kable(eff_table,
+      col.names=c("Condition","Weighted Mean Rank",
+                   "Ranked #1 (most effective)","Ranked #4 (least effective)",
+                   "Objective Mean RT (s)"),
+      align=c("l","c","c","c","c"),
+      caption="Perceived Effectiveness Rankings vs Objective Response Time") %>%
+  kable_styling(bootstrap_options=c("striped","hover","condensed"),
+                full_width=TRUE) %>%
+  column_spec(1, bold=TRUE) %>%
+  column_spec(5, color="grey40", italic=TRUE) %>%
+  row_spec(1, background="#E2EFDA") %>%
+  row_spec(4, background="#FCE4D6") %>%
+  footnote(general="Lower weighted mean rank = rated more effective. Objective RT included for comparison.")
+```
+
+**Object Outline** received the most favourable effectiveness ratings, with the lowest weighted mean rank and the most participants placing it first. **Peripheral Halo** and **Directional Beam** occupied the middle positions, while **Color Varying Highlight** (Depth Colour) was most often rated least effective — consistent with its significantly slower objective response times.
+
+## Personal Preference (Q7)
+
+```{r preference-chart, fig.cap="Stacked bar chart showing preference rankings. Rank 1 = most preferred."}
+pref_plot <- preference_df %>%
+  mutate(
+    Condition = factor(Condition,
+                        levels=pref_summary$Condition),
+    Rank      = factor(Rank, levels=4:1,
+                        labels=c("Rank 4 (least)","Rank 3","Rank 2","Rank 1 (most)"))
+  )
+
+ggplot(pref_plot, aes(x=Condition, y=Count, fill=Rank)) +
+  geom_bar(stat="identity", width=0.6, colour="white") +
+  geom_text(aes(label=ifelse(Count>0, Count, "")),
+            position=position_stack(vjust=0.5), size=3.5,
+            colour="white", fontface="bold") +
+  scale_fill_manual(values=c("#D6E4F0","#5B9BD5","#1F5C99","#0D2B4E"),
+                    guide=guide_legend(reverse=TRUE)) +
+  coord_flip() +
+  labs(x=NULL, y="Number of Participants", fill="Ranking") +
+  theme_minimal(base_size=12) +
+  theme(panel.grid.major.y=element_blank())
+```
+
+```{r preference-table}
+pref_table <- pref_summary %>%
+  mutate(
+    WeightedMean = round(WeightedMean, 2),
+    RTMean       = round(desc_stats$Mean[match(name_map[Condition],
+                                                desc_stats$Condition)], 3)
+  ) %>%
+  left_join(
+    preference_df %>% filter(Rank==1) %>% select(Condition,Count) %>%
+      rename(Rank1=Count), by="Condition") %>%
+  left_join(
+    preference_df %>% filter(Rank==4) %>% select(Condition,Count) %>%
+      rename(Rank4=Count), by="Condition") %>%
+  arrange(WeightedMean) %>%
+  select(Condition, WeightedMean, Rank1, Rank4, RTMean)
+
+kable(pref_table,
+      col.names=c("Condition","Weighted Mean Rank",
+                   "Ranked #1 (most preferred)","Ranked #4 (least preferred)",
+                   "Objective Mean RT (s)"),
+      align=c("l","c","c","c","c"),
+      caption="Personal Preference Rankings vs Objective Response Time") %>%
+  kable_styling(bootstrap_options=c("striped","hover","condensed"),
+                full_width=TRUE) %>%
+  column_spec(1, bold=TRUE) %>%
+  column_spec(5, color="grey40", italic=TRUE) %>%
+  row_spec(1, background="#E2EFDA") %>%
+  row_spec(4, background="#FCE4D6") %>%
+  footnote(general="Lower weighted mean rank = more preferred.")
+```
+
+**Directional Beam** was the most preferred technique overall, with 7 out of 12 participants ranking it first. **Object Outline** was the second most preferred. Notably, **Peripheral Halo** received zero first-place preference votes despite producing the fastest objective response times — suggesting a disconnect between performance and user preference for this technique.
+
+## Alignment Between Preference, Effectiveness, and Response Time
+
+```{r alignment-chart, fig.cap="Comparison of subjective rankings (effectiveness and preference) against objective response time. Rankings are normalised so lower values consistently indicate better performance."}
+rt_ranked <- desc_stats %>%
+  arrange(Mean) %>%
+  mutate(RT_Rank = row_number(),
+         SurveyName = names(name_map)[match(Condition, name_map)])
+
+alignment <- eff_summary %>%
+  rename(Eff_Rank = WeightedMean) %>%
+  left_join(pref_summary %>% rename(Pref_Rank=WeightedMean), by="Condition") %>%
+  left_join(rt_ranked %>% select(SurveyName, RT_Rank, Mean),
+            by=c("Condition"="SurveyName")) %>%
+  select(Condition, Eff_Rank, Pref_Rank, RT_Rank, Mean)
+
+align_long <- alignment %>%
+  pivot_longer(cols=c(Eff_Rank, Pref_Rank, RT_Rank),
+               names_to="Measure",
+               values_to="Value") %>%
+  mutate(
+    Measure = recode(Measure,
+                      Eff_Rank  = "Perceived Effectiveness",
+                      Pref_Rank = "Personal Preference",
+                      RT_Rank   = "Response Time (objective)"),
+    Condition = factor(Condition,
+                        levels=c("Object Outline","Directional Beam",
+                                 "Peripheral Halo","Color Varying"))
+  )
+
+ggplot(align_long, aes(x=Measure, y=Value,
+                        group=Condition, colour=Condition)) +
+  geom_line(linewidth=1.2, alpha=0.8) +
+  geom_point(size=4) +
+  geom_text(aes(label=round(Value,1)), vjust=-0.7, size=3.2, fontface="bold") +
+  scale_colour_manual(values=c(
+    "Object Outline"   = "#70AD47",
+    "Peripheral Halo"  = "#ED7D31",
+    "Color Varying"    = "#1F3864",
+    "Directional Beam" = "#2E75B6"
+  )) +
+  scale_y_reverse(limits=c(4.5, 0.5),
+                   breaks=1:4,
+                   labels=c("1\n(best)","2","3","4\n(worst)")) +
+  labs(x=NULL, y="Rank (lower = better)", colour="Condition") +
+  theme_minimal(base_size=12) +
+  theme(panel.grid.minor=element_blank(),
+        legend.position="bottom")
+```
+
+The alignment chart reveals a key tension in the data: **Peripheral Halo produced the fastest response times objectively but was least preferred by participants**. Conversely, **Object Outline and Directional Beam** were highly preferred and rated effective despite not being the fastest. This suggests that participants value clarity and non-intrusiveness alongside raw detection speed.
+
+---
+
+# Open-ended Responses
+
+Participants provided written justifications for their most and least preferred techniques. These responses were analysed thematically, grouping comments into recurring themes.
+
+## Most Preferred Technique (Q5)
+
+```{r most-pref-counts, fig.height=3, fig.cap="Number of participants nominating each technique as most preferred in open-ended responses."}
+mp_df <- data.frame(
+  Condition = c("Object Outline","Color Varying","Directional Beam"),
+  Count     = c(6, 5, 1),
+  Survey    = c("ObjectOutline","DepthColour","DirectionalBeam")
+)
+
+ggplot(mp_df, aes(x=reorder(Condition,-Count), y=Count, fill=Condition)) +
+  geom_bar(stat="identity", width=0.5, alpha=0.85) +
+  geom_text(aes(label=paste0(Count," participants")),
+            vjust=-0.4, fontface="bold", size=4) +
+  scale_fill_manual(values=c("#70AD47","#1F3864","#2E75B6")) +
+  scale_y_continuous(limits=c(0,9), expand=expansion(mult=c(0,0.1))) +
+  labs(x=NULL, y="Count") +
+  theme_minimal(base_size=12) +
+  theme(legend.position="none", panel.grid.major.x=element_blank())
+```
+
+### Object Outline (6 participants)
+
+Object Outline was the most frequently nominated preferred technique. Participants cited two primary themes:
+
+**Theme 1 — Clarity and precision.** Participants appreciated that the outline made it immediately clear *which specific object* was the hazard, without ambiguity:
+
+> *"I think it was the clearest at showing where a complete object was, and it was a lot easier for me to tell where the object was in relation to the other objects in the scene."*
+
+> *"I liked the object outline as it was very obvious which was the problem and was quicker to identify."*
+
+> *"Object outline because the outline was more obvious to me. Color varying highlight was less obvious to me until some time passed."*
+
+**Theme 2 — Balance between salience and non-intrusiveness.** Several participants valued that the outline was noticeable without being overwhelming or distracting from the driving context:
+
+> *"It felt like it had a good balance between being easy to spot without being overly distracting."*
+
+> *"The outline I found looked visually pleasing."*
+
+### Color Varying Highlight / Depth Colour (5 participants)
+
+Five participants preferred the colour change technique, citing two distinct reasons:
+
+**Theme 1 — Subtlety and non-distraction.** These participants preferred a less aggressive visual cue:
+
+> *"I found it easier to identify and was much more subtle when it came to screen."*
+
+> *"As it is decently effective without being distracting or shocking."*
+
+> *"The others were too visually overwhelming."*
+
+**Theme 2 — Differentiating hazard from environment.** One participant highlighted a practical consideration unique to colour change:
+
+> *"It helps differentiate better in case I see cars of the same colour, cause not everyone might notice the outline immediately."*
+
+### Directional Beam (1 participant)
+
+One participant preferred the Directional Beam, noting it struck a balance between the extremes:
+
+> *"I like the directional light beam but I perceived it as a highlight with a red box beneath the car which made it more effective than the regular highlight but not as distracting as the halo."*
+
+---
+
+## Least Preferred Technique (Q6)
+
+```{r least-pref-counts, fig.height=3, fig.cap="Number of participants nominating each technique as least preferred in open-ended responses."}
+lp_df <- data.frame(
+  Condition = c("Peripheral Halo","Color Varying","Directional Beam"),
+  Count     = c(9, 2, 1)
+)
+
+ggplot(lp_df, aes(x=reorder(Condition,-Count), y=Count, fill=Condition)) +
+  geom_bar(stat="identity", width=0.5, alpha=0.85) +
+  geom_text(aes(label=paste0(Count," participants")),
+            vjust=-0.4, fontface="bold", size=4) +
+  scale_fill_manual(values=c("#ED7D31","#1F3864","#2E75B6")) +
+  scale_y_continuous(limits=c(0,12), expand=expansion(mult=c(0,0.1))) +
+  labs(x=NULL, y="Count") +
+  theme_minimal(base_size=12) +
+  theme(legend.position="none", panel.grid.major.x=element_blank())
+```
+
+### Peripheral Halo (9 participants)
+
+An overwhelming majority — **9 out of 12 participants** — identified the Peripheral Halo as their least preferred technique. Three distinct themes emerged:
+
+**Theme 1 — Lack of specificity.** The most frequent complaint was that the halo did not indicate *which* vehicle was the hazard:
+
+> *"Although it was easy to identify, it was difficult to tell which car in particular was the hazard which might make it difficult to decide how to respond."*
+
+> *"The peripheral halo was very alarming and didn't tell me what the hazard was."*
+
+> *"The halo would probably be very distracting and also not tell me where the danger is."*
+
+> *"It was unclear to me where the hazard was coming from compared to object outline and color varying highlight, which made a specific threat more obvious rather than generalizing."*
+
+**Theme 2 — Visual disruption and disorientation.** Many participants found the halo intrusive and distressing:
+
+> *"It kind of obstructs my field of view and disorients me."*
+
+> *"It was abruptive to my vision and I found it fairly distracting whenever it came to screen."*
+
+> *"Every time it came up it startled me and distracted from the road."*
+
+> *"The large circle that appeared. It kind of scared me."*
+
+**Theme 3 — Sizing issues.** One participant found the halo too small, suggesting calibration may affect perception:
+
+> *"The dot was too small."*
+
+### Color Varying Highlight (2 participants)
+
+Two participants nominated Depth Colour as least preferred, both citing **insufficient salience**:
+
+> *"It was a little tricky to notice as quickly... I feel like I would double-guess myself if I was unsure if I saw it or not if it's too light for a small hazard. That kind of doubt wouldn't be good during driving."*
+
+> *"It's not as obvious while driving to me."*
+
+### Directional Beam (1 participant)
+
+One participant listed the Directional Beam as least preferred without elaboration.
+
+---
+
+# Integrated Findings: Quantitative and Qualitative Convergence
+
+This section synthesises the response time data with the survey findings to form a coherent overall picture of each technique's strengths and weaknesses.
+
+```{r integrated-table}
+integrated <- data.frame(
+  Condition     = c("Peripheral Halo","Directional Beam",
+                     "Object Outline","Depth Colour"),
+  MeanRT        = c(0.455, 0.478, 0.528, 0.733),
+  RTRank        = c("1st (fastest)","2nd","3rd","4th (slowest)"),
+  EffRank       = c("2nd","2nd","1st","4th"),
+  PrefRank      = c("4th (lowest)","1st (highest)","2nd","3rd"),
+  MostPref      = c("0 / 12","1 / 12","6 / 12","5 / 12"),
+  LeastPref     = c("9 / 12","1 / 12","0 / 12","2 / 12"),
+  KeyStrength   = c("Fastest detection","Explicit direction","Clarity & balance","Subtlety"),
+  KeyWeakness   = c("Not specific; disorienting","Moderate salience","Slightly slower","Too subtle; slow RT")
+)
+
+kable(integrated,
+      col.names = c("Condition","Mean RT (s)","RT Rank",
+                     "Effectiveness Rank","Preference Rank",
+                     "Most Preferred","Least Preferred",
+                     "Key Strength","Key Weakness"),
+      align = c("l","c","c","c","c","c","c","l","l"),
+      caption = "Integrated Summary: Objective and Subjective Findings") %>%
+  kable_styling(bootstrap_options=c("striped","hover","condensed"),
+                full_width=TRUE, font_size=12) %>%
+  column_spec(1, bold=TRUE) %>%
+  column_spec(2:3, color="grey40") %>%
+  row_spec(3, background="#E2EFDA") %>%
+  row_spec(4, background="#FCE4D6")
+```
+
+## Key Tensions and Insights
+
+**1. Peripheral Halo: fastest but least preferred.** The Peripheral Halo produced the fastest mean response time (M = 0.455s) and was rated reasonably effective, yet 9 of 12 participants nominated it as their least preferred technique. Qualitative responses reveal the reason: participants found it visually alarming, disorienting, and unable to identify *which specific vehicle* was the hazard. This suggests the halo may trigger fast reactions partly through a startle response rather than clear hazard identification — a mechanism that could cause anxiety or fatigue in prolonged use. The fast RT is therefore accompanied by significant usability concerns that limit its practical application.
+
+**2. Object Outline: best balance of performance and preference.** The Object Outline was not the fastest technique (3rd in RT), but it was consistently rated the most effective and second most preferred. Participants valued its clarity — the outline made the specific hazard vehicle unambiguous — without being visually overwhelming. No participant named it least preferred. This convergence of moderate performance with high acceptance makes it a strong candidate for practical deployment.
+
+**3. Directional Beam: preferred but moderate performance.** The Directional Beam was the most preferred technique overall (7 of 12 participants ranked it first in preference), yet it was only second fastest in RT and was significantly slower than Object Outline in the post-hoc analysis (p = .035). The single participant who preferred it qualitatively noted it struck a middle ground between effectiveness and non-distraction. Its preference despite moderate performance may reflect the intuitive nature of a directional pointer in a driving context.
+
+**4. Depth Colour: least salient despite preference from some.** The Depth Colour technique was consistently the slowest (M = 0.733s, significantly slower than all others, all p < .01) and was rated least effective. However 5 participants still named it most preferred, citing its subtlety and non-distracting nature. This suggests a subset of participants prioritise low visual intrusion over detection speed — an important consideration for system design, where the choice of technique may need to be calibrated to the severity of the hazard.
+
+---
+
+# Summary
+
+The quantitative analysis demonstrated a significant effect of highlighting condition on response time, F(`r df1`, `r df2`) = `r F_val`, p `r ifelse(p_gg < .001, "< .001", paste0("= ", p_gg))` (Greenhouse-Geisser corrected), η²(g) = `r ges`. The survey data contextualises and extends these findings in several important ways:
+
+- **Detection speed and user preference do not always align.** The fastest technique (Peripheral Halo) was the least preferred, while the most preferred (Directional Beam) was only moderately fast.
+- **Specificity matters.** Participants consistently valued techniques that made the *specific* hazard vehicle identifiable. Techniques perceived as vague or general (Peripheral Halo, Depth Colour) were criticised regardless of their objective performance.
+- **Visual comfort is a usability concern.** Multiple participants described the Peripheral Halo as startling, alarming, or disorienting — effects that could be problematic in real-world or prolonged use even if detection speed is high.
+- **Object Outline offers the best overall profile** when both objective performance and subjective experience are considered — it produced fast detection, high clarity ratings, strong preference, and no negative qualitative reactions.
+- **Depth Colour's slow RT is reflected in qualitative feedback** — the same participants who noted it was "not obvious" or required "some time to pass" before noticing it are consistent with the significantly longer response times observed in the data.
+
+These findings together suggest that for practical hazard highlighting applications in VR driving environments, **Object Outline and Directional Beam** are the most suitable candidates, offering a combination of acceptable detection speed and positive user experience. Further research with larger and more diverse samples is recommended before generalising these conclusions.
+
+---
+
+# Appendix
+
+## Raw Open-ended Responses: Most Preferred (Q5)
+
+```{r raw-most}
+raw_most <- data.frame(
+  Technique = c("Object Outline","Object Outline","Object Outline",
+                 "Object Outline","Object Outline","Object Outline",
+                 "Color Varying","Color Varying","Color Varying",
+                 "Color Varying","Color Varying","Directional Beam"),
+  Response  = c(
+    "I would prefer the object outline because it felt like it had a good balance between being easy to spot without being overly distracting. The color varying highlight was also good, though having the whole thing turn red might sometimes be distracting while driving.",
+    "I preferred the object outline, I think it was the clearest at showing where a complete object was, and it was a lot easier for me to tell where the object was in relation to the other objects in the scene.",
+    "the outline I found looked visually pleasing",
+    "Object Outline",
+    "I liked the object outline as it was very obvious which was the problem and was quicker to identify.",
+    "Object outline because the outline was more obvious to me. Color varying highlight was less obvious to me until some time passed.",
+    "I think the colour varying would be my most prefered because it helps differentiate better incase i see cars of the same colour cause not everyone might notice the outline immediately",
+    "I would prefer the colour varying highlight because I found it easier to identify and was much more subtle when it came to screen.",
+    "Probably the outline (color varying highlight) as it is decently effective without being distracting or shocking",
+    "object colour change because it shows me where the hazard is and is pretty noticeable",
+    "The one where the car turned red. The others were too visually overwhelming",
+    "I like the directional light beam but I perceived it as a highlight with a red box beneath the car which made it more effective than the regular highlight but not as distracting as the halo."
+  )
+)
+
+kable(raw_most, col.names=c("Technique","Response"),
+      align=c("l","l"),
+      caption="All Open-ended Responses: Most Preferred Technique (Q5)") %>%
+  kable_styling(bootstrap_options=c("striped","condensed"), full_width=TRUE) %>%
+  column_spec(1, bold=TRUE, width="15em") %>%
+  column_spec(2, width="55em")
+```
+
+## Raw Open-ended Responses: Least Preferred (Q6)
+
+```{r raw-least}
+raw_least <- data.frame(
+  Technique = c("Peripheral Halo","Peripheral Halo","Peripheral Halo",
+                 "Peripheral Halo","Peripheral Halo","Peripheral Halo",
+                 "Peripheral Halo","Peripheral Halo","Peripheral Halo",
+                 "Color Varying","Color Varying","Directional Beam"),
+  Response  = c(
+    "I would least prefer the peripheral halo, because although it was easy to identify, it was difficult to tell which car in particular was the hazard which might make it difficult to decide how to respond.",
+    "the peripheral halo was very alarming and didn't tell me what the hazard was.",
+    "the peripheral halo it kind of obstructs my field of view and disorients me",
+    "I would least prefer the peripheral halo because it was abruptive to my vision and I found it fairly distracting whenever it came to screen.",
+    "The peripheral halo, every time it came up it startled me and distracted from the road",
+    "the halo would probably be very distacting and also not tell me where the danger is",
+    "The large circle that appeared. It kind of scared me.",
+    "The dot was too small",
+    "Peripheral halo, because it was unclear to me where the hazard was coming from compared to object outline and color varying highlight, which made a specific threat more obvious rather than generalizing",
+    "The colour varying highlight was a little tricky to notice as quickly. I suppose it depends on how severe the hazard is, but I feel like I would double-guess myself if I was unsure if I saw it or not if it's too light for a small hazard. That kind of doubt wouldn't be good during driving.",
+    "colour varying, it's not as obvious while driving to me.",
+    "Directional Light Beam"
+  )
+)
+
+kable(raw_least, col.names=c("Technique","Response"),
+      align=c("l","l"),
+      caption="All Open-ended Responses: Least Preferred Technique (Q6)") %>%
+  kable_styling(bootstrap_options=c("striped","condensed"), full_width=TRUE) %>%
+  column_spec(1, bold=TRUE, width="15em") %>%
+  column_spec(2, width="55em")
+```

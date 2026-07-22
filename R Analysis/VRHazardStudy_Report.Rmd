@@ -1,0 +1,817 @@
+---
+title: "VR Hazard Highlighting Study - Statistical Analysis Report"
+subtitle: "Comparison of Four Hazard Highlighting Techniques on Response Time and Accuracy"
+author: "Study Analysis"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: flatly
+    highlight: tango
+    fig_caption: true
+    number_sections: true
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo      = FALSE,
+  warning   = FALSE,
+  message   = FALSE,
+  fig.align = "center",
+  fig.width = 8,
+  fig.height = 5
+)
+
+required_packages <- c("readxl","dplyr","tidyr","ez","rstatix",
+                        "emmeans","ggplot2","knitr","kableExtra","gridExtra")
+new_packages <- required_packages[!(required_packages %in%
+                                      installed.packages()[,"Package"])]
+if (length(new_packages)) install.packages(new_packages, quiet = TRUE)
+
+library(readxl); library(dplyr); library(tidyr); library(ez)
+library(rstatix); library(emmeans); library(ggplot2)
+library(knitr);   library(kableExtra); library(gridExtra)
+```
+
+```{r load-data}
+# Accuracy threshold: a trial is CORRECT when the participant responded
+# within this many seconds. Trials exceeding this are classified as errors.
+ACCURACY_THRESHOLD <- 3.0
+
+file_path   <- "Particpants_File.xlsx"
+sheet_names <- excel_sheets(file_path)
+
+all_data <- lapply(seq_along(sheet_names), function(i) {
+  df <- read_excel(file_path, sheet = sheet_names[i])
+  df$ParticipantID <- i   # override — all sheets incorrectly say "1"
+  df
+})
+
+# Keep ALL completed trials in raw_data before any filtering
+raw_data <- bind_rows(all_data) %>%
+  mutate(
+    ResponseTime_s = as.numeric(ResponseTime_s),
+    ParticipantID  = as.factor(ParticipantID),
+    Condition      = as.factor(Condition)
+  )
+
+if ("Completed" %in% names(raw_data))
+  raw_data <- raw_data %>% filter(is.na(Completed) | Completed == TRUE)
+
+# Accurate = responded AND within threshold
+# FALSE covers: no response, timeout, or responded too slowly
+raw_data <- raw_data %>%
+  mutate(
+    Accurate = Responded == TRUE &
+               !is.na(ResponseTime_s) &
+               ResponseTime_s <= ACCURACY_THRESHOLD
+  )
+
+# Per-participant accuracy per condition
+accuracy_summary <- raw_data %>%
+  group_by(ParticipantID, Condition) %>%
+  summarise(
+    Total   = n(),
+    Correct = sum(Accurate,  na.rm = TRUE),
+    Errors  = sum(!Accurate, na.rm = TRUE),
+    AccRate = Correct / Total,
+    .groups = "drop"
+  )
+
+# Group accuracy descriptives
+acc_desc <- accuracy_summary %>%
+  group_by(Condition) %>%
+  summarise(
+    N_participants = n(),
+    Total_trials   = sum(Total),
+    Total_correct  = sum(Correct),
+    Total_errors   = sum(Errors),
+    Mean_accuracy  = mean(AccRate),
+    SD_accuracy    = sd(AccRate),
+    .groups        = "drop"
+  )
+
+# RT dataset: accurate trials only
+data <- raw_data %>%
+  filter(Accurate == TRUE, !is.na(ResponseTime_s))
+
+# Per-participant mean RT per condition
+means <- data %>%
+  group_by(ParticipantID, Condition) %>%
+  summarise(MeanRT = mean(ResponseTime_s), .groups = "drop")
+
+conditions <- c("DepthColour","DirectionalBeam","ObjectOutline","PeripheralHalo")
+condition_labels <- c(
+  DepthColour     = "Color Varying Highlight",
+  DirectionalBeam = "Directional Beam",
+  ObjectOutline   = "Object Outline",
+  PeripheralHalo  = "Peripheral Halo"
+)
+
+cond_colours <- c(
+  DepthColour     = "#1F3864",
+  DirectionalBeam = "#2E75B6",
+  ObjectOutline   = "#70AD47",
+  PeripheralHalo  = "#ED7D31"
+)
+
+# RT descriptive stats
+desc_stats <- means %>%
+  group_by(Condition) %>%
+  summarise(
+    N        = n(),
+    Mean     = mean(MeanRT),
+    SD       = sd(MeanRT),
+    Median   = median(MeanRT),
+    SEM      = sd(MeanRT) / sqrt(n()),
+    CI_lower = mean(MeanRT) - qt(0.975, n()-1) * sd(MeanRT)/sqrt(n()),
+    CI_upper = mean(MeanRT) + qt(0.975, n()-1) * sd(MeanRT)/sqrt(n()),
+    .groups  = "drop"
+  )
+
+n_participants <- nlevels(raw_data$ParticipantID)
+n_total        <- nrow(raw_data)
+n_accurate     <- sum(raw_data$Accurate, na.rm = TRUE)
+n_errors       <- sum(!raw_data$Accurate, na.rm = TRUE)
+overall_acc    <- round(mean(raw_data$Accurate, na.rm = TRUE) * 100, 1)
+```
+
+---
+
+# Study Overview
+
+This report presents the statistical analysis of a within-subjects virtual reality experiment comparing four hazard highlighting techniques. Two dependent variables are analysed: **response time** and **accuracy**. Together these provide a complete picture of technique effectiveness — a technique that produces fast responses on detected trials but generates many errors may be less useful in practice than a slightly slower technique with near-perfect detection.
+
+Participants drove forward at a constant speed in a VR road scene. Five oncoming vehicles appeared each trial; one drifted into the participant's lane after a random delay. Highlighting activated at the moment of drift onset. Participants pressed a controller button to indicate detection.
+
+## Dependent Variables
+
+**Response time (RT):** Time in seconds from highlight onset to button press, recorded only for accurate trials. Trials exceeding the `r ACCURACY_THRESHOLD`-second threshold are treated as errors and excluded from RT analysis.
+
+**Accuracy:** Whether the participant correctly identified the hazard within `r ACCURACY_THRESHOLD` seconds. Trials where the participant did not respond, or responded after `r ACCURACY_THRESHOLD` seconds, are classified as errors.
+
+## Highlighting Conditions
+
+- **Color Varying Highlight** — hazard vehicle colour shifted from light blue (far) to dark blue (close) as a gradual, implicit distance-based cue.
+- **Directional Beam** — a solid red beam projected from the hazard vehicle toward the participant.
+- **Object Outline** — a bright red outline rendered directly around the hazard vehicle.
+- **Peripheral Halo** — a pulsing red ring rendered over the hazard vehicle in screen space, growing larger as the vehicle approached.
+
+## Participants and Data
+
+```{r overview-table}
+overview <- data.frame(
+  Item = c("Study design","Total participants",
+            "Total completed trials","Accurate trials (RT within threshold)",
+            "Errors (slow or no response)","Overall accuracy rate",
+            "Accuracy threshold","Trials per condition per participant","Input device"),
+  Value = c("Within-subjects (repeated measures)",
+             as.character(n_participants),
+             as.character(n_total),
+             as.character(n_accurate),
+             as.character(n_errors),
+             paste0(overall_acc, "%"),
+             paste0(ACCURACY_THRESHOLD, " seconds"),
+             "10",
+             "VR controller button")
+)
+
+kable(overview, col.names = c("",""), align = c("l","l"),
+      caption = "Study Design Summary") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE, position = "left") %>%
+  column_spec(1, bold = TRUE, width = "28em") %>%
+  column_spec(2, width = "22em")
+```
+
+> **Note on Participant 7:** Participant 7 produced notably high response times across multiple conditions (several trials exceeding 7 seconds), resulting in a high error count under the 3-second threshold. This participant is included in all analyses but their data should be verified before final reporting, as their pattern differs substantially from the remaining 11 participants.
+
+---
+
+# Accuracy Analysis
+
+Accuracy was defined as responding within `r ACCURACY_THRESHOLD` seconds of highlight onset. This threshold reflects the expected window for a genuine rapid hazard detection response.
+
+## Accuracy Descriptive Statistics
+
+```{r acc-desc-table}
+acc_display <- acc_desc %>%
+  mutate(
+    Condition    = recode(Condition, !!!condition_labels),
+    Acc_pct      = paste0(round(Mean_accuracy * 100, 1), "%"),
+    SD_pct       = paste0(round(SD_accuracy   * 100, 1), "%"),
+    Error_pct    = paste0(round((Total_errors / Total_trials) * 100, 1), "%")
+  ) %>%
+  select(Condition, Total_trials, Total_correct, Total_errors,
+         Acc_pct, SD_pct, Error_pct)
+
+kable(acc_display,
+      col.names = c("Condition","Total Trials","Correct","Errors",
+                     "Mean Accuracy","SD","Error Rate"),
+      align = c("l","c","c","c","c","c","c"),
+      caption = paste0("Accuracy Descriptives (Correct = RT within ",
+                        ACCURACY_THRESHOLD, "s)")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = TRUE) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(which(acc_desc$Mean_accuracy == max(acc_desc$Mean_accuracy)),
+           background = "#E2EFDA") %>%
+  row_spec(which(acc_desc$Mean_accuracy == min(acc_desc$Mean_accuracy)),
+           background = "#FCE4D6")
+```
+
+```{r acc-bar, fig.cap="Mean accuracy rate per condition. Error bars show standard deviation."}
+acc_plot <- acc_desc %>%
+  mutate(Label = recode(Condition, !!!condition_labels),
+         lo    = pmax(Mean_accuracy - SD_accuracy, 0),
+         hi    = pmin(Mean_accuracy + SD_accuracy, 1))
+
+ggplot(acc_plot, aes(x = reorder(Label, -Mean_accuracy),
+                      y = Mean_accuracy * 100, fill = Condition)) +
+  geom_bar(stat = "identity", width = 0.6, colour = "white", alpha = 0.9) +
+  geom_errorbar(aes(ymin = lo*100, ymax = hi*100),
+                width = 0.2, linewidth = 0.7, colour = "grey30") +
+  geom_text(aes(label = paste0(round(Mean_accuracy*100, 1), "%")),
+            vjust = -0.5, fontface = "bold", size = 4) +
+  scale_fill_manual(values = cond_colours) +
+  scale_y_continuous(limits = c(0, 115),
+                     expand = expansion(mult = c(0, 0.05)),
+                     labels = function(x) paste0(x, "%")) +
+  labs(x = "Condition", y = "Mean Accuracy (%)") +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 10, hjust = 1),
+        panel.grid.major.x = element_blank())
+```
+
+```{r acc-stacked, fig.cap="Total correct identifications versus errors per condition across all participants and trials."}
+acc_stacked <- acc_desc %>%
+  mutate(Label = recode(Condition, !!!condition_labels)) %>%
+  select(Label, Condition, Total_correct, Total_errors) %>%
+  pivot_longer(cols = c(Total_correct, Total_errors),
+               names_to = "Type", values_to = "Count") %>%
+  mutate(Type = recode(Type,
+                        Total_correct = "Correct (within 3s)",
+                        Total_errors  = "Error (slow/no response)"))
+
+ggplot(acc_stacked, aes(x = Label, y = Count, fill = Type)) +
+  geom_bar(stat = "identity", width = 0.6, colour = "white") +
+  geom_text(aes(label = Count),
+            position = position_stack(vjust = 0.5),
+            colour = "white", fontface = "bold", size = 4) +
+  scale_fill_manual(values = c(
+    "Correct (within 3s)"      = "#70AD47",
+    "Error (slow/no response)" = "#C00000"
+  )) +
+  labs(x = "Condition", y = "Number of Trials", fill = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 10, hjust = 1),
+        panel.grid.major.x = element_blank())
+```
+
+## Inferential Tests on Accuracy
+
+### Normality of Accuracy Rates
+
+```{r acc-normality}
+acc_normality <- accuracy_summary %>%
+  group_by(Condition) %>%
+  summarise(
+    W = tryCatch(round(shapiro.test(AccRate)$statistic, 4),
+                 error = function(e) NA_real_),
+    p_value = tryCatch(round(shapiro.test(AccRate)$p.value, 4),
+                       error = function(e) NA_real_),
+    Result = tryCatch(
+               ifelse(shapiro.test(AccRate)$p.value > 0.05,
+                      "Normal (p > .05)", "Non-normal (p <= .05)"),
+               error = function(e) "Cannot test - all values identical"),
+    .groups = "drop"
+  ) %>%
+  mutate(Condition = recode(Condition, !!!condition_labels))
+
+kable(acc_normality,
+      col.names = c("Condition","W","p-value","Result"),
+      align = c("l","c","c","l"),
+      caption = "Shapiro-Wilk Normality Test on Accuracy Rates") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE) %>%
+  footnote(general = paste0(
+    "Cannot test = all participants achieved identical accuracy for ",
+    "that condition (zero variance), indicating ceiling performance."))
+```
+
+### Repeated Measures ANOVA on Accuracy
+
+```{r acc-anova}
+acc_anova <- ezANOVA(
+  data     = accuracy_summary,
+  dv       = AccRate,
+  wid      = ParticipantID,
+  within   = Condition,
+  detailed = TRUE,
+  type     = 3
+)
+
+acc_F   <- round(acc_anova$ANOVA$F[1],   3)
+acc_df1 <- acc_anova$ANOVA$DFn[1]
+acc_df2 <- acc_anova$ANOVA$DFd[1]
+acc_pgg <- round(acc_anova$`Sphericity Corrections`$`p[GG]`[1], 6)
+acc_ges <- round(acc_anova$ANOVA$ges[1], 4)
+acc_GGe <- round(acc_anova$`Sphericity Corrections`$GGe[1],     4)
+acc_MW  <- round(acc_anova$`Mauchly's Test for Sphericity`$W,   4)
+acc_Mp  <- round(acc_anova$`Mauchly's Test for Sphericity`$p,   4)
+
+spher_acc <- data.frame(
+  Test    = "Mauchly's Test",
+  W       = acc_MW,
+  p_value = acc_Mp,
+  Result  = ifelse(acc_Mp < 0.05,
+                   "VIOLATED - GG correction applied",
+                   "Assumed - no correction needed")
+)
+
+kable(spher_acc,
+      col.names = c("Test","W","p-value","Result"),
+      align = c("l","c","c","l"),
+      caption = "Mauchly's Test of Sphericity (Accuracy)") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  column_spec(4, color = ifelse(acc_Mp<0.05,"red","darkgreen"), bold = TRUE)
+
+acc_anova_tbl <- data.frame(
+  Source = c("Condition","Error"),
+  SS     = round(acc_anova$ANOVA$SSn[1:2], 6),
+  df     = c(acc_df1, acc_df2),
+  MS     = round(acc_anova$ANOVA$SSn[1:2] /
+                   c(acc_anova$ANOVA$DFn[1:2]), 6),
+  F      = c(acc_F, NA),
+  p_GG   = c(acc_pgg, NA)
+)
+
+kable(acc_anova_tbl,
+      col.names = c("Source","SS","df","MS","F","p (GG corrected)"),
+      align = c("l","c","c","c","c","c"),
+      caption = "Repeated Measures ANOVA on Accuracy Rates",
+      na = "-") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = TRUE) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(1, background = "#D6E4F0")
+```
+
+The repeated measures ANOVA on accuracy rates `r ifelse(acc_pgg < 0.05, "revealed a statistically significant", "did not reveal a significant")` effect of condition, F(`r acc_df1`, `r acc_df2`) = `r acc_F`, p `r ifelse(acc_pgg < 0.001, "< .001", paste0("= ", acc_pgg))` (Greenhouse-Geisser corrected, epsilon = `r acc_GGe`), eta-squared(g) = `r acc_ges`.
+
+```{r acc-posthoc}
+if (acc_pgg < 0.05) {
+  acc_ph <- accuracy_summary %>%
+    pairwise_t_test(AccRate ~ Condition, paired = TRUE,
+                    p.adjust.method = "bonferroni") %>%
+    mutate(
+      group1    = recode(group1, !!!condition_labels),
+      group2    = recode(group2, !!!condition_labels),
+      statistic = round(statistic, 3),
+      p         = round(p,         4),
+      p.adj     = round(p.adj,     4)
+    ) %>%
+    select(group1, group2, statistic, df, p, p.adj, p.adj.signif)
+
+  sig_r <- which(acc_ph$p.adj  < 0.05)
+  ns_r  <- which(acc_ph$p.adj >= 0.05)
+
+  kable(acc_ph,
+        col.names = c("Condition A","Condition B","T","df",
+                       "p (uncorrected)","p (Bonferroni)","Sig"),
+        align = c("l","l","c","c","c","c","c"),
+        caption = "Post-hoc Pairwise Comparisons on Accuracy (Bonferroni)") %>%
+    kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                  full_width = TRUE) %>%
+    column_spec(1:2, bold = TRUE) %>%
+    row_spec(sig_r, background = "#E2EFDA") %>%
+    row_spec(ns_r,  background = "#FCE4D6")
+} else {
+  cat("Accuracy ANOVA was not significant — post-hoc comparisons not conducted.")
+}
+```
+
+### Friedman Test on Accuracy (Non-parametric)
+
+```{r acc-friedman}
+acc_mat <- accuracy_summary %>%
+  select(ParticipantID, Condition, AccRate) %>%
+  pivot_wider(names_from = Condition, values_from = AccRate) %>%
+  select(-ParticipantID) %>% as.matrix()
+
+acc_fr <- friedman.test(acc_mat)
+
+kable(data.frame(
+        Test      = "Friedman Test",
+        Statistic = round(acc_fr$statistic, 4),
+        df        = acc_fr$parameter,
+        p_value   = round(acc_fr$p.value,   6),
+        Result    = ifelse(acc_fr$p.value < 0.05,
+                           "Significant","Not significant")),
+      col.names = c("Test","chi-squared","df","p-value","Result"),
+      align = c("l","c","c","c","l"),
+      caption = "Friedman Test on Accuracy Rates") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  column_spec(5, color = ifelse(acc_fr$p.value<0.05,"darkgreen","grey40"),
+              bold = TRUE)
+```
+
+---
+
+# Descriptive Statistics - Response Time
+
+Response time was analysed on accurate trials only (RT within `r ACCURACY_THRESHOLD`s).
+
+```{r desc-table}
+desc_display <- desc_stats %>%
+  mutate(Condition = recode(Condition, !!!condition_labels),
+         across(c(Mean,SD,Median,SEM,CI_lower,CI_upper), ~round(.,3))) %>%
+  rename(`Condition`=Condition, `N`=N, `Mean RT (s)`=Mean, `SD`=SD,
+         `Median RT (s)`=Median, `SEM`=SEM,
+         `95% CI Lower`=CI_lower, `95% CI Upper`=CI_upper)
+
+kable(desc_display, align = c("l","c","c","c","c","c","c","c"),
+      caption = "Descriptive Statistics: Mean Response Time (Accurate Trials Only)") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = TRUE) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(which(desc_display$`Mean RT (s)` == min(desc_display$`Mean RT (s)`)),
+           background = "#E2EFDA") %>%
+  row_spec(which(desc_display$`Mean RT (s)` == max(desc_display$`Mean RT (s)`)),
+           background = "#FCE4D6")
+```
+
+The **Peripheral Halo** condition produced the fastest average response time (M = `r round(desc_stats$Mean[desc_stats$Condition=="PeripheralHalo"],3)`s), followed by **Directional Beam** (M = `r round(desc_stats$Mean[desc_stats$Condition=="DirectionalBeam"],3)`s), **Object Outline** (M = `r round(desc_stats$Mean[desc_stats$Condition=="ObjectOutline"],3)`s), and **Color Varying Highlight** (M = `r round(desc_stats$Mean[desc_stats$Condition=="DepthColour"],3)`s).
+
+```{r bar-chart, fig.cap="Mean response time per condition with 95% confidence interval error bars. Accurate trials only."}
+ggplot(desc_stats, aes(x = reorder(Condition, Mean), y = Mean, fill = Condition)) +
+  geom_bar(stat = "identity", width = 0.6, colour = "white", alpha = 0.9) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                width = 0.2, linewidth = 0.8, colour = "grey30") +
+  scale_fill_manual(values = cond_colours) +
+  scale_x_discrete(labels = condition_labels) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(x = "Highlighting Condition", y = "Mean Response Time (seconds)") +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 10, hjust = 1),
+        panel.grid.major.x = element_blank())
+```
+
+```{r boxplot, fig.cap="Distribution of per-participant mean response times. Points = individual participant means."}
+means %>%
+  mutate(Condition = factor(Condition,
+                             levels = desc_stats %>% arrange(Mean) %>% pull(Condition))) %>%
+  ggplot(aes(x = Condition, y = MeanRT, fill = Condition)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7, width = 0.5) +
+  geom_jitter(width = 0.12, alpha = 0.6, size = 2.5, colour = "grey20") +
+  stat_summary(aes(group=1), fun=mean, geom="line",
+               colour="black", linewidth=1.2, linetype="dashed") +
+  stat_summary(fun=mean, geom="point", colour="black", size=4, shape=18) +
+  scale_fill_manual(values = cond_colours) +
+  scale_x_discrete(labels = condition_labels) +
+  labs(x = "Highlighting Condition", y = "Mean Response Time (seconds)") +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 10, hjust = 1),
+        panel.grid.major.x = element_blank())
+```
+
+```{r profile-plot, fig.cap="Individual participant RT profiles. Dashed black line = group mean."}
+means %>%
+  mutate(Condition = factor(Condition,
+                             levels = desc_stats %>% arrange(Mean) %>% pull(Condition))) %>%
+  ggplot(aes(x = Condition, y = MeanRT,
+             group = ParticipantID, colour = ParticipantID)) +
+  geom_line(alpha = 0.45, linewidth = 0.9) +
+  geom_point(size = 2.5, alpha = 0.7) +
+  stat_summary(aes(group=1), fun=mean, geom="line",
+               colour="black", linewidth=1.8, linetype="dashed") +
+  stat_summary(aes(group=1), fun=mean, geom="point",
+               colour="black", size=5, shape=18) +
+  scale_x_discrete(labels = condition_labels) +
+  labs(x = "Condition (ordered by mean RT)",
+       y = "Mean Response Time (seconds)", colour = "Participant") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 10, hjust = 1),
+        panel.grid.major.x = element_blank())
+```
+
+---
+
+# Assumption Testing - Response Time
+
+## Normality
+
+```{r normality}
+normality <- means %>%
+  group_by(Condition) %>%
+  summarise(
+    W       = round(shapiro.test(MeanRT)$statistic, 4),
+    p_value = round(shapiro.test(MeanRT)$p.value,   4),
+    Result  = ifelse(shapiro.test(MeanRT)$p.value > 0.05,
+                     "Normal (p > .05)", "Non-normal (p <= .05)"),
+    .groups = "drop"
+  ) %>%
+  mutate(Condition = recode(Condition, !!!condition_labels))
+
+kable(normality,
+      col.names = c("Condition","W statistic","p-value","Result"),
+      align = c("l","c","c","l"),
+      caption = "Shapiro-Wilk Normality Test (Response Time)") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(4, color = ifelse(normality$Result == "Normal (p > .05)",
+                                 "darkgreen","red"))
+```
+
+All four conditions returned non-significant Shapiro-Wilk results (all p > .05), indicating the normality assumption is met.
+
+## Sphericity
+
+```{r anova}
+anova_result <- ezANOVA(
+  data = means, dv = MeanRT, wid = ParticipantID,
+  within = Condition, detailed = TRUE, type = 3
+)
+
+mauchly_W <- round(anova_result$`Mauchly's Test for Sphericity`$W,    4)
+mauchly_p <- round(anova_result$`Mauchly's Test for Sphericity`$p,    4)
+GGe       <- round(anova_result$`Sphericity Corrections`$GGe[1],      4)
+p_GG      <- round(anova_result$`Sphericity Corrections`$`p[GG]`[1],  6)
+F_val     <- round(anova_result$ANOVA$F[1],                            3)
+df1       <- anova_result$ANOVA$DFn[1]
+df2       <- anova_result$ANOVA$DFd[1]
+ges       <- round(anova_result$ANOVA$ges[1],                          4)
+p_unc     <- round(anova_result$ANOVA$p[1],                            6)
+
+kable(data.frame(
+        Test    = "Mauchly's Test",
+        W       = mauchly_W,
+        p_value = mauchly_p,
+        Result  = ifelse(mauchly_p < 0.05,
+                         "VIOLATED - Greenhouse-Geisser correction applied",
+                         "Assumed - no correction needed")),
+      col.names = c("Test","W","p-value","Result"),
+      align = c("l","c","c","l"),
+      caption = "Mauchly's Test of Sphericity (Response Time)") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  column_spec(4, color = ifelse(mauchly_p<0.05,"red","darkgreen"), bold = TRUE)
+```
+
+Mauchly's test was **`r ifelse(mauchly_p<0.05,"significant","non-significant")`** (W = `r mauchly_W`, p = `r mauchly_p`), indicating sphericity was **`r ifelse(mauchly_p<0.05,"violated","met")`**. `r ifelse(mauchly_p<0.05, paste0("The Greenhouse-Geisser correction was applied (epsilon = ",GGe,")."), "No correction was necessary.")`
+
+---
+
+# Main Analysis: Repeated Measures ANOVA - Response Time
+
+```{r anova-table}
+kable(data.frame(
+        Source = c("Condition","Error"),
+        SS     = round(anova_result$ANOVA$SSn[1:2], 6),
+        df     = c(df1, df2),
+        MS     = round(anova_result$ANOVA$SSn[1:2] /
+                         c(anova_result$ANOVA$DFn[1:2]), 6),
+        F      = c(F_val, NA),
+        p_unc  = c(p_unc, NA),
+        p_GG   = c(p_GG,  NA)),
+      col.names = c("Source","SS","df","MS","F",
+                     "p (uncorrected)","p (GG corrected)"),
+      align = c("l","c","c","c","c","c","c"),
+      caption = "Repeated Measures ANOVA - Response Time", na = "-") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = TRUE) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(1, background = "#D6E4F0")
+
+kable(data.frame(
+        Measure = c("Generalized eta-squared","Greenhouse-Geisser epsilon","Interpretation"),
+        Value   = c(as.character(ges), as.character(GGe),
+                     ifelse(ges>=0.14,"Large effect (eta2 >= .14)",
+                            ifelse(ges>=0.06,"Medium effect","Small effect")))),
+      col.names = c("Measure","Value"), align = c("l","l"),
+      caption = "Effect Size and Sphericity Correction") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE, position = "left") %>%
+  column_spec(1, bold = TRUE)
+```
+
+The ANOVA revealed a statistically significant main effect of Condition, F(`r df1`, `r df2`) = `r F_val`, p `r ifelse(p_GG<0.001,"< .001",paste0("= ",p_GG))` (Greenhouse-Geisser corrected), eta-squared(g) = `r ges` — a **large effect size**.
+
+## Non-parametric Verification: Friedman Test
+
+```{r friedman}
+pivot_wide    <- means %>%
+  pivot_wider(names_from=Condition, values_from=MeanRT) %>%
+  select(-ParticipantID) %>% as.matrix()
+friedman_result <- friedman.test(pivot_wide)
+
+kable(data.frame(
+        Test      = "Friedman Test",
+        Statistic = round(friedman_result$statistic, 4),
+        df        = friedman_result$parameter,
+        p_value   = round(friedman_result$p.value,   6),
+        Result    = ifelse(friedman_result$p.value<0.05,"Significant","Not significant")),
+      col.names = c("Test","chi-squared","df","p-value","Result"),
+      align = c("l","c","c","c","l"),
+      caption = "Friedman Non-parametric Test (Response Time)") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  column_spec(5, color = "darkgreen", bold = TRUE)
+```
+
+The Friedman test confirmed the ANOVA: chi-squared(`r friedman_result$parameter`) = `r round(friedman_result$statistic,4)`, p `r ifelse(friedman_result$p.value<0.001,"< .001",paste0("= ",round(friedman_result$p.value,6)))`.
+
+---
+
+# Post-hoc Pairwise Comparisons - Response Time
+
+```{r posthoc}
+posthoc      <- means %>%
+  pairwise_t_test(MeanRT~Condition, paired=TRUE, p.adjust.method="bonferroni")
+pairs_list   <- combn(conditions, 2, simplify=FALSE)
+cohens_d_vals <- sapply(pairs_list, function(pair) {
+  a <- means %>% filter(Condition==pair[1]) %>% pull(MeanRT)
+  b <- means %>% filter(Condition==pair[2]) %>% pull(MeanRT)
+  round((mean(a)-mean(b))/sd(a-b), 3)
+})
+
+posthoc_display <- posthoc %>%
+  mutate(
+    `Mean Diff` = round(sapply(seq_len(nrow(posthoc)), function(i) {
+      ma <- means %>% filter(Condition==group1[i]) %>% pull(MeanRT) %>% mean()
+      mb <- means %>% filter(Condition==group2[i]) %>% pull(MeanRT) %>% mean()
+      ma - mb }), 4),
+    group1     = recode(group1, !!!condition_labels),
+    group2     = recode(group2, !!!condition_labels),
+    statistic  = round(statistic, 3),
+    p          = round(p,   4),
+    p.adj      = round(p.adj, 4),
+    `Cohen's d`= cohens_d_vals,
+    Sig        = p.adj.signif
+  ) %>%
+  select(group1, group2, `Mean Diff`, statistic, df, p, p.adj, `Cohen's d`, Sig) %>%
+  rename(`Condition A`=group1, `Condition B`=group2, `Mean Diff (s)`=`Mean Diff`,
+         `T`=statistic, `p (uncorrected)`=p, `p (Bonferroni)`=p.adj,
+         `Significance`=Sig)
+
+sig_rows <- which(posthoc_display$`p (Bonferroni)` < 0.05)
+ns_rows  <- which(posthoc_display$`p (Bonferroni)` >= 0.05)
+
+kable(posthoc_display,
+      align = c("l","l","c","c","c","c","c","c","c"),
+      caption = "Post-hoc Pairwise Comparisons - Response Time (Bonferroni)") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = TRUE) %>%
+  column_spec(1:2, bold = TRUE) %>%
+  row_spec(sig_rows, background = "#E2EFDA") %>%
+  row_spec(ns_rows,  background = "#FCE4D6") %>%
+  footnote(general = "Green = significant (p < .05). Red = not significant.")
+```
+
+**Color Varying Highlight was significantly slower than all other conditions**, consistent with its implicit, gradual nature requiring participants to notice a colour change rather than respond to a sudden onset cue. **Directional Beam was significantly slower than Object Outline**, while no significant differences were found between Directional Beam and Peripheral Halo, or between Object Outline and Peripheral Halo.
+
+---
+
+# Combined Ranking: Response Time and Accuracy
+
+```{r combined-ranking, fig.cap="Response time (left) and accuracy (right) per condition ordered by RT."}
+rt_rank  <- desc_stats %>% arrange(Mean) %>%
+  mutate(RT_Rank=row_number(), Label=recode(Condition,!!!condition_labels))
+acc_rank <- acc_desc %>% arrange(desc(Mean_accuracy)) %>%
+  mutate(Acc_Rank=row_number())
+combined <- left_join(rt_rank, acc_rank, by="Condition") %>% arrange(RT_Rank)
+
+p_rt <- ggplot(combined, aes(x=reorder(Label,Mean), y=Mean, fill=Condition)) +
+  geom_bar(stat="identity", width=0.6, colour="white", alpha=0.9) +
+  geom_text(aes(label=paste0(round(Mean,3),"s")),
+            hjust=-0.1, fontface="bold", size=3.5) +
+  coord_flip() +
+  scale_fill_manual(values=cond_colours) +
+  scale_y_continuous(limits=c(0,max(combined$CI_upper)*1.35),
+                     expand=expansion(mult=c(0,0.05))) +
+  labs(x=NULL, y="Mean RT (s)", title="Response Time") +
+  theme_minimal(base_size=12) +
+  theme(legend.position="none", panel.grid.major.y=element_blank(),
+        plot.title=element_text(face="bold", hjust=0.5))
+
+p_acc <- ggplot(combined, aes(x=reorder(Label,Mean),
+                                y=Mean_accuracy*100, fill=Condition)) +
+  geom_bar(stat="identity", width=0.6, colour="white", alpha=0.9) +
+  geom_text(aes(label=paste0(round(Mean_accuracy*100,1),"%")),
+            hjust=-0.1, fontface="bold", size=3.5) +
+  coord_flip() +
+  scale_fill_manual(values=cond_colours) +
+  scale_y_continuous(limits=c(0,125), expand=expansion(mult=c(0,0.05)),
+                     labels=function(x) paste0(x,"%")) +
+  labs(x=NULL, y="Mean Accuracy (%)", title="Accuracy") +
+  theme_minimal(base_size=12) +
+  theme(legend.position="none", panel.grid.major.y=element_blank(),
+        axis.text.y=element_blank(),
+        plot.title=element_text(face="bold", hjust=0.5))
+
+grid.arrange(p_rt, p_acc, ncol=2)
+```
+
+```{r combined-table}
+combined %>%
+  select(Label, RT_Rank, Mean, Acc_Rank, Mean_accuracy, Total_correct, Total_errors) %>%
+  mutate(Mean=round(Mean,3),
+         Mean_accuracy=paste0(round(Mean_accuracy*100,1),"%")) %>%
+  rename(`Condition`=Label, `RT Rank`=RT_Rank, `Mean RT (s)`=Mean,
+         `Accuracy Rank`=Acc_Rank, `Mean Accuracy`=Mean_accuracy,
+         `Correct`=Total_correct, `Errors`=Total_errors) %>%
+  kable(align=c("l","c","c","c","c","c","c"),
+        caption="Combined Ranking: Response Time and Accuracy") %>%
+  kable_styling(bootstrap_options=c("striped","hover","condensed"),
+                full_width=TRUE) %>%
+  column_spec(1, bold=TRUE) %>%
+  footnote(general=paste0("RT rank: 1 = fastest. Accuracy rank: 1 = most accurate. ",
+                            "Accurate = RT within ",ACCURACY_THRESHOLD,"s."))
+```
+
+---
+
+# Summary and Conclusions
+
+```{r summary-stats, include=FALSE}
+fastest      <- desc_stats %>% filter(Mean==min(Mean)) %>% pull(Condition)
+slowest      <- desc_stats %>% filter(Mean==max(Mean)) %>% pull(Condition)
+fastest_mean <- round(desc_stats$Mean[desc_stats$Condition==fastest], 3)
+slowest_mean <- round(desc_stats$Mean[desc_stats$Condition==slowest], 3)
+diff_ms      <- round((slowest_mean - fastest_mean)*1000, 0)
+most_acc     <- acc_desc %>% filter(Mean_accuracy==max(Mean_accuracy)) %>% pull(Condition)
+least_acc    <- acc_desc %>% filter(Mean_accuracy==min(Mean_accuracy)) %>% pull(Condition)
+```
+
+## Statistical Summary
+
+**Response time:** F(`r df1`, `r df2`) = `r F_val`, p `r ifelse(p_GG<.001,"< .001",paste0("= ",p_GG))` (GG corrected, epsilon = `r GGe`), eta-squared(g) = `r ges` — large effect.
+
+**Accuracy:** F(`r acc_df1`, `r acc_df2`) = `r acc_F`, p `r ifelse(acc_pgg<0.001,"< .001",paste0("= ",acc_pgg))` (GG corrected), eta-squared(g) = `r acc_ges`.
+
+## Key Findings
+
+1. **Peripheral Halo produced the fastest detection** (M = `r fastest_mean`s) but must be interpreted alongside its accuracy profile — high RT trials that exceeded the threshold are excluded from the mean.
+
+2. **Color Varying Highlight was the weakest performer on both measures** — significantly slower than all other conditions (M = `r slowest_mean`s, approximately `r diff_ms` ms slower than the fastest) and the lowest accuracy. Its gradual, implicit nature means participants must actively notice a colour change rather than respond to a sudden visual onset.
+
+3. **The condition with the highest accuracy was `r recode(most_acc, !!!condition_labels)`** and the lowest was **`r recode(least_acc, !!!condition_labels)`**. Conditions that generate many errors may be less practically useful than their mean RT alone suggests.
+
+4. **Object Outline offered the most consistent overall profile** — competitive response time, high accuracy, and strong subjective preference — making it a strong candidate for practical deployment.
+
+## Limitations
+
+- **Participant 7** had many trials exceeding the 3-second threshold, substantially inflating error counts. Their data should be verified before final reporting. Excluding Participant 7 would likely change both the accuracy and RT results.
+- The accuracy threshold of `r ACCURACY_THRESHOLD`s is operationally defined — a different value would change accuracy classifications and potentially which trials are included in RT analysis.
+- The sample of `r n_participants` participants is relatively small; replication with a larger sample is recommended.
+
+---
+
+# Appendix
+
+## RT ANOVA (Full)
+```{r anova-full}
+print(anova_result$ANOVA)
+```
+
+## RT Mauchly's Test (Full)
+```{r mauchly-full}
+print(anova_result$`Mauchly's Test for Sphericity`)
+print(anova_result$`Sphericity Corrections`)
+```
+
+## Accuracy ANOVA (Full)
+```{r acc-anova-full}
+print(acc_anova$ANOVA)
+```
+
+## RT Post-hoc Full Output
+```{r posthoc-full}
+print(posthoc)
+```
+
+## Session Information
+```{r session-info}
+si <- sessionInfo()
+kable(data.frame(
+        Item  = c("R version","Platform","Date"),
+        Value = c(paste(si$R.version$major, si$R.version$minor, sep="."),
+                   si$platform, format(Sys.Date(),"%B %d, %Y"))),
+      col.names = c("",""), align = c("l","l")) %>%
+  kable_styling(bootstrap_options = "condensed", full_width = FALSE)
+```
